@@ -7,8 +7,9 @@
 use std::collections::HashMap;
 
 use affinidi_keri_core::kever::Kever;
-use affinidi_keri_core::parser::{self, Attachment};
-use affinidi_keri_crypto::Verfer;
+use affinidi_keri_core::parser::{self, Attachment, ParsedMessage};
+use affinidi_keri_core::serder::Serder;
+use affinidi_keri_crypto::{Siger, Verfer};
 use affinidi_keri_db::KeriStore;
 
 use crate::error::KeriError;
@@ -26,22 +27,60 @@ pub struct ProcessResult {
     pub ilk: String,
 }
 
+/// Extract controller signatures from parsed attachments.
+pub(crate) fn extract_controller_sigs(attachments: &[Attachment]) -> Vec<Siger> {
+    let mut sigs = Vec::new();
+    for att in attachments {
+        if let Attachment::ControllerSigs(s) = att {
+            sigs.extend_from_slice(s);
+        }
+    }
+    sigs
+}
+
+/// Extract verification keys from a serialized event's `"k"` field.
+pub(crate) fn verfers_from_serder(serder: &Serder) -> Result<Vec<Verfer>, KeriError> {
+    let keys: Vec<String> = serder
+        .sad()
+        .get("k")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    keys.iter()
+        .map(|k| Verfer::from_qb64(k).map_err(KeriError::Crypto))
+        .collect::<Result<Vec<_>, _>>()
+}
+
 /// Process an incoming message stream in direct mode.
 ///
-/// 1. Parses the incoming data using `parser::parse_next()` to extract the
-///    serialized event and typed attachments.
-/// 2. Verifies controller signatures via `Kever`.
-/// 3. Verifies witness receipt couples when a backer threshold is set.
-/// 4. Stores the event, KEL entry, signatures, and receipts.
-/// 5. Tracks verified key state in the `kevers` map.
-///
-/// Returns a `ProcessResult` describing the processed event.
+/// Parses raw bytes and delegates to [`process_parsed`].
 pub fn process_message(
     data: &[u8],
     store: &dyn KeriStore,
     kevers: &mut HashMap<String, Kever>,
 ) -> Result<ProcessResult, KeriError> {
     let (parsed, _consumed) = parser::parse_next(data)?;
+    process_parsed(&parsed, store, kevers)
+}
+
+/// Process a pre-parsed message in direct mode.
+///
+/// 1. Verifies controller signatures via `Kever`.
+/// 2. Verifies witness receipt couples when a backer threshold is set.
+/// 3. Stores the event, KEL entry, signatures, and receipts.
+/// 4. Tracks verified key state in the `kevers` map.
+///
+/// Returns a `ProcessResult` describing the processed event.
+pub fn process_parsed(
+    parsed: &ParsedMessage,
+    store: &dyn KeriStore,
+    kevers: &mut HashMap<String, Kever>,
+) -> Result<ProcessResult, KeriError> {
     let serder = &parsed.serder;
 
     let prefix = serder.prefix()?;
@@ -50,47 +89,28 @@ pub fn process_message(
     let ilk = serder.ilk()?;
 
     // Separate attachment types
-    let mut controller_sigs = Vec::new();
+    let controller_sigs = extract_controller_sigs(&parsed.attachments);
     let mut receipt_couples = Vec::new();
     let mut raw_sig_bytes = Vec::new();
 
     for att in &parsed.attachments {
         match att {
             Attachment::ControllerSigs(sigs) => {
-                // Build raw bytes for storage
                 for sig in sigs {
                     let qb64 = sig.qb64().map_err(KeriError::Crypto)?;
                     raw_sig_bytes.extend_from_slice(qb64.as_bytes());
                 }
-                controller_sigs.extend_from_slice(sigs);
             }
             Attachment::ReceiptCouples(couples) => {
                 receipt_couples.extend_from_slice(couples);
             }
-            Attachment::WitnessSigs(_) | Attachment::Raw(_) => {
-                // Store raw attachment bytes if present
-            }
+            Attachment::WitnessSigs(_) | Attachment::Raw(_) => {}
         }
     }
 
     match ilk.as_str() {
         "icp" | "dip" => {
-            // Extract keys from the event SAD to build verfers
-            let keys: Vec<String> = serder
-                .sad()
-                .get("k")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let verfers: Vec<Verfer> = keys
-                .iter()
-                .map(|k| Verfer::from_qb64(k).map_err(KeriError::Crypto))
-                .collect::<Result<Vec<_>, _>>()?;
+            let verfers = verfers_from_serder(serder)?;
 
             // Create Kever — verifies controller signatures
             let kever = Kever::new(serder, &controller_sigs, &verfers)?;

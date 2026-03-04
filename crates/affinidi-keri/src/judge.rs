@@ -9,8 +9,7 @@
 use std::collections::{HashMap, HashSet};
 
 use affinidi_keri_core::kever::Kever;
-use affinidi_keri_core::parser::{self, Attachment};
-use affinidi_keri_crypto::Verfer;
+use affinidi_keri_core::parser::{self, ParsedMessage};
 use affinidi_keri_db::KeriStore;
 
 use crate::direct::{self, ProcessResult};
@@ -38,9 +37,9 @@ pub struct DuplicityEvidence {
     pub first_seen_said: String,
     /// The SAID of the conflicting event.
     pub duplicitous_said: String,
-    /// The raw bytes of the first-seen event.
+    /// The raw serialized event body of the first-seen event.
     pub first_seen_event: Vec<u8>,
-    /// The raw bytes of the conflicting event.
+    /// The raw serialized event body of the conflicting event.
     pub duplicitous_event: Vec<u8>,
 }
 
@@ -56,6 +55,10 @@ pub enum JudgeResult {
 }
 
 /// A KERI Judge that enforces the first-seen policy and detects duplicity.
+///
+/// The `duplicitous` set and `del` vector are maintained together: any prefix
+/// in `duplicitous` has at least one entry in `del`, and vice versa. All
+/// mutations go through [`record_duplicity`](Self::record_duplicity).
 pub struct Judge {
     store: Box<dyn KeriStore>,
     kevers: HashMap<String, Kever>,
@@ -77,14 +80,14 @@ impl Judge {
     /// Process an incoming message, enforcing the first-seen policy.
     ///
     /// 1. Pre-parse to extract prefix, sn, said, ilk.
-    /// 2. For `rct` messages: pass through to `direct::process_message`.
+    /// 2. For `rct` messages: pass through to `direct::process_parsed`.
     /// 3. Check `store.get_first_seen(prefix, sn)`:
-    ///    - `None` → delegate to `direct::process_message`, return `Accepted`.
+    ///    - `None` → delegate to `direct::process_parsed`, return `Accepted`.
     ///    - `Some(same_said)` → idempotent replay, return `DuplicateAccepted`.
     ///    - `Some(different_said)` → verify the new event independently;
     ///      if valid, record duplicity evidence and return `DuplicityDetected`.
     pub fn process(&mut self, data: &[u8]) -> Result<JudgeResult, KeriError> {
-        // Pre-parse to inspect prefix/sn/said/ilk before committing anything.
+        // Parse once — reused for both inspection and processing.
         let (parsed, _consumed) = parser::parse_next(data)?;
         let serder = &parsed.serder;
 
@@ -96,11 +99,11 @@ impl Judge {
         // Receipts don't affect key state — just pass through.
         if ilk == "rct" {
             let result =
-                direct::process_message(data, self.store.as_ref(), &mut self.kevers)?;
+                direct::process_parsed(&parsed, self.store.as_ref(), &mut self.kevers)?;
             return Ok(JudgeResult::Accepted(result));
         }
 
-        // Check the first-seen log BEFORE calling process_message,
+        // Check the first-seen log BEFORE calling process_parsed,
         // because LMDB put is an upsert that would silently overwrite.
         let first_seen = self.store.get_first_seen(&prefix, sn)?;
 
@@ -108,7 +111,7 @@ impl Judge {
             None => {
                 // No prior event at this (prefix, sn) — accept normally.
                 let result =
-                    direct::process_message(data, self.store.as_ref(), &mut self.kevers)?;
+                    direct::process_parsed(&parsed, self.store.as_ref(), &mut self.kevers)?;
                 Ok(JudgeResult::Accepted(result))
             }
             Some(ref existing_said) if existing_said == &said => {
@@ -119,15 +122,7 @@ impl Judge {
                 // Different SAID at the same (prefix, sn) — potential duplicity.
                 // Verify the new event independently to confirm it's valid
                 // (not just a corrupt/forged message).
-                self.verify_for_duplicity(
-                    data,
-                    &parsed,
-                    &prefix,
-                    sn,
-                    &said,
-                    &ilk,
-                    existing_said,
-                )
+                self.verify_for_duplicity(&parsed, existing_said)
             }
         }
     }
@@ -135,43 +130,21 @@ impl Judge {
     /// Verify a conflicting event independently to confirm genuine duplicity.
     fn verify_for_duplicity(
         &mut self,
-        _data: &[u8],
-        parsed: &parser::ParsedMessage,
-        prefix: &str,
-        sn: u64,
-        said: &str,
-        ilk: &str,
+        parsed: &ParsedMessage,
         existing_said: &str,
     ) -> Result<JudgeResult, KeriError> {
         let serder = &parsed.serder;
+        let prefix = serder.prefix()?;
+        let sn = serder.sn()?;
+        let said = serder.said()?;
+        let ilk = serder.ilk()?;
 
-        // Extract controller signatures from attachments.
-        let mut controller_sigs = Vec::new();
-        for att in &parsed.attachments {
-            if let Attachment::ControllerSigs(sigs) = att {
-                controller_sigs.extend_from_slice(sigs);
-            }
-        }
+        let controller_sigs = direct::extract_controller_sigs(&parsed.attachments);
 
         // Trial-verify the new event without committing to the store.
-        match ilk {
+        match ilk.as_str() {
             "icp" | "dip" => {
-                // Build verfers from the event's key list and create a temp Kever.
-                let keys: Vec<String> = serder
-                    .sad()
-                    .get("k")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                let verfers: Vec<Verfer> = keys
-                    .iter()
-                    .map(|k| Verfer::from_qb64(k).map_err(KeriError::Crypto))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let verfers = direct::verfers_from_serder(serder)?;
 
                 // Kever::new verifies signatures — if it succeeds the event is valid.
                 Kever::new(serder, &controller_sigs, &verfers)?;
@@ -180,7 +153,7 @@ impl Judge {
                 // Verify signatures against the current key state.
                 // This works for ixn (keys unchanged) and for rot when
                 // the signing keys are the same as the current kever's.
-                if let Some(kever) = self.kevers.get(prefix) {
+                if let Some(kever) = self.kevers.get(&prefix) {
                     kever.verify_sigs(serder.raw(), &controller_sigs)?;
                 } else {
                     return Err(KeriError::NotFound(format!(
@@ -199,21 +172,32 @@ impl Judge {
         let first_seen_event = self
             .store
             .get_event(existing_said)?
-            .unwrap_or_default();
+            .ok_or_else(|| {
+                KeriError::NotFound(format!(
+                    "first-seen event {existing_said} missing from store"
+                ))
+            })?;
 
         let evidence = DuplicityEvidence {
-            prefix: prefix.to_string(),
+            prefix: prefix.clone(),
             sn,
             first_seen_said: existing_said.to_string(),
-            duplicitous_said: said.to_string(),
+            duplicitous_said: said,
             first_seen_event,
             duplicitous_event: serder.raw().to_vec(),
         };
 
-        self.duplicitous.insert(prefix.to_string());
-        self.del.push(evidence.clone());
+        Ok(JudgeResult::DuplicityDetected(self.record_duplicity(evidence)))
+    }
 
-        Ok(JudgeResult::DuplicityDetected(evidence))
+    /// Record duplicity evidence and flag the prefix.
+    ///
+    /// Maintains the invariant that `self.duplicitous` contains exactly the
+    /// set of prefixes that appear in `self.del`.
+    fn record_duplicity(&mut self, evidence: DuplicityEvidence) -> DuplicityEvidence {
+        self.duplicitous.insert(evidence.prefix.clone());
+        self.del.push(evidence.clone());
+        evidence
     }
 
     /// Return the trust verdict for a prefix.
