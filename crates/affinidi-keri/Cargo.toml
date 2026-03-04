@@ -1,0 +1,20 @@
+[package]
+name = "affinidi-keri"
+version = "0.1.0"
+description = "KERI identity management and direct mode protocol"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+affinidi-cesr = { workspace = true }
+affinidi-keri-crypto = { workspace = true }
+affinidi-keri-core = { workspace = true }
+affinidi-keri-db = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+tempfile = { workspace = true }

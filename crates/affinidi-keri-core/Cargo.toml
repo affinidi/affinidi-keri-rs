@@ -1,0 +1,22 @@
+[package]
+name = "affinidi-keri-core"
+version = "0.1.0"
+description = "Core KERI protocol: events, serialization, KEL verification, parsing"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+affinidi-cesr = { workspace = true }
+affinidi-keri-crypto = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ciborium = { workspace = true }
+rmp-serde = { workspace = true }
+indexmap = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }

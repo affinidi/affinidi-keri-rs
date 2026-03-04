@@ -1,0 +1,19 @@
+[package]
+name = "affinidi-keri-db"
+version = "0.1.0"
+description = "Storage layer for KERI with LMDB implementation"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+affinidi-keri-core = { workspace = true }
+affinidi-keri-crypto = { workspace = true }
+affinidi-cesr = { workspace = true }
+heed = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }
+tempfile = { workspace = true }

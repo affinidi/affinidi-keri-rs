@@ -1,0 +1,61 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/affinidi-cesr",
+    "crates/affinidi-keri-crypto",
+    "crates/affinidi-keri-core",
+    "crates/affinidi-keri-db",
+    "crates/affinidi-keri",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.90.0"
+license = "Apache-2.0"
+repository = "https://github.com/nicktho/affinidi-keri"
+
+[workspace.dependencies]
+# Internal crates
+affinidi-cesr = { path = "crates/affinidi-cesr" }
+affinidi-keri-crypto = { path = "crates/affinidi-keri-crypto" }
+affinidi-keri-core = { path = "crates/affinidi-keri-core" }
+affinidi-keri-db = { path = "crates/affinidi-keri-db" }
+affinidi-keri = { path = "crates/affinidi-keri" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ciborium = "0.2"
+rmp-serde = "1"
+indexmap = { version = "2", features = ["serde"] }
+
+# Crypto
+ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
+k256 = { version = "0.13", features = ["ecdsa", "sha256"] }
+p256 = { version = "0.13", features = ["ecdsa", "sha256"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+blake3 = "1"
+blake2 = "0.10"
+sha2 = "0.10"
+sha3 = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+zeroize = { version = "1", features = ["derive"] }
+digest = "0.10"
+
+# Encoding
+base64ct = { version = "1", features = ["alloc"] }
+
+# Storage
+heed = "0.20"
+
+# Error handling & logging
+thiserror = "2"
+tracing = "0.1"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Testing
+hex = "0.4"
+tempfile = "3"
