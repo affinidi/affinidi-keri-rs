@@ -49,7 +49,7 @@ The workspace contains five crates that build on each other in layers:
 | [affinidi-keri-crypto](crates/affinidi-keri-crypto/) | Cryptographic primitives — signing (Ed25519, secp256k1, P-256), digests (Blake2/3, SHA2/3), key derivation (Argon2), and verification |
 | [affinidi-keri-core](crates/affinidi-keri-core/) | Core KERI protocol — event structures (inception, rotation, interaction, delegation, receipts), KEL verification, serialization, and parsing |
 | [affinidi-keri-db](crates/affinidi-keri-db/) | Storage layer — LMDB-backed persistence for events, key event logs, signatures, witness receipts, key state, and escrow |
-| [affinidi-keri](crates/affinidi-keri/) | High-level identity management — Hab (single identifier), Habery (multi-identifier registry), direct mode message processing, and configuration |
+| [affinidi-keri](crates/affinidi-keri/) | High-level identity management — Hab (single identifier), Habery (multi-identifier registry), direct mode message processing, Judge (duplicity detection), and configuration |
 
 ## Quick Start
 
@@ -156,6 +156,45 @@ cargo test --package affinidi-keri test_witness_receipt_message_stored -- --noca
 Demonstrates a witness generating and storing a receipt message for a
 controller's inception event, verifying the receipt is persisted and
 parseable.
+
+### Judge: Duplicity Detection
+
+```bash
+cargo run -p affinidi-keri --example demo_judge
+```
+
+Demonstrates the KERI Judge role that enforces the **first-seen policy** and
+detects **duplicity** — when a controller publishes two different valid events
+at the same `(prefix, sn)`.
+
+**What it demonstrates:**
+
+1. **The problem** — Two separate verifiers each accept a different interaction
+   event at sn=1 from the same controller. Neither detects the conflict because
+   each only sees its own stream of events.
+
+2. **The solution** — A Judge remembers the first valid event at each
+   `(prefix, sn)`. When a second, conflicting event arrives:
+   - The Judge verifies it is cryptographically valid (not just corrupt)
+   - Records `DuplicityEvidence` with both SAIDs and event bytes
+   - Flags the prefix as `Duplicitous` in its verdict
+   - Stores evidence in the Duplicitous Event Log (DEL)
+
+3. **Idempotent replay** — Replaying the same event returns `DuplicateAccepted`
+   without triggering duplicity.
+
+4. **Verdict transitions** — `Unknown` → `Trusted` (after first valid event) →
+   `Duplicitous` (after conflicting event detected).
+
+### Witness Receipts
+
+```bash
+cargo run -p affinidi-keri --example demo_witness
+```
+
+Demonstrates the full witness lifecycle: creating non-transferable witness
+identifiers, receipting controller events, and verifying that a threshold of
+witness receipts is required for event acceptance.
 
 ### Inception Without Witnesses
 
