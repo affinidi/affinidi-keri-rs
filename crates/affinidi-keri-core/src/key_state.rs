@@ -3,6 +3,8 @@
 //! KeyState captures the current authoritative state of a KERI
 //! identifier at a given point in its key event log.
 
+use affinidi_keri_crypto::{Diger, Verfer};
+
 use crate::error::CoreError;
 use crate::event::{InceptionEvent, InteractionEvent, RotationEvent};
 use crate::threshold::Threshold;
@@ -75,6 +77,14 @@ impl KeyState {
 
         let backer_threshold = parse_backer_threshold(&event.backer_threshold)?;
 
+        // Validate backer threshold is satisfiable
+        if backer_threshold > event.backers.len() {
+            return Err(CoreError::Validation(format!(
+                "backer threshold ({backer_threshold}) exceeds backer count ({})",
+                event.backers.len()
+            )));
+        }
+
         Ok(Self {
             prefix: event.prefix.clone(),
             sn: 0,
@@ -121,6 +131,10 @@ impl KeyState {
             )));
         }
 
+        // Verify next-key commitments: each rotation key must match a
+        // digest committed to in the previous establishment event.
+        verify_next_key_commitment(&event.keys, &self.next_keys)?;
+
         let threshold = event.keys_threshold.0.clone();
         let next_threshold = event.next_threshold.0.clone();
         let backer_threshold = parse_backer_threshold(&event.backer_threshold)?;
@@ -132,6 +146,14 @@ impl KeyState {
             if !new_backers.contains(b) {
                 new_backers.push(b.clone());
             }
+        }
+
+        // Validate backer threshold is satisfiable
+        if backer_threshold > new_backers.len() {
+            return Err(CoreError::Validation(format!(
+                "backer threshold ({backer_threshold}) exceeds backer count ({})",
+                new_backers.len()
+            )));
         }
 
         Ok(Self {
@@ -187,6 +209,46 @@ impl KeyState {
     }
 }
 
+/// Verify that each rotation key matches a next-key digest commitment.
+///
+/// The rotation keys (`keys`) must correspond positionally to the
+/// committed digests (`next_keys`) from the prior establishment event.
+/// Each key is hashed using the algorithm indicated by the digest's CESR
+/// code, and the result must match the committed digest.
+fn verify_next_key_commitment(keys: &[String], next_keys: &[String]) -> Result<(), CoreError> {
+    if keys.len() != next_keys.len() {
+        return Err(CoreError::Validation(format!(
+            "rotation key count ({}) does not match next-key commitment count ({})",
+            keys.len(),
+            next_keys.len()
+        )));
+    }
+
+    for (i, (key_qb64, digest_qb64)) in keys.iter().zip(next_keys.iter()).enumerate() {
+        let verfer = Verfer::from_qb64(key_qb64).map_err(|e| {
+            CoreError::Validation(format!("invalid rotation key at index {i}: {e}"))
+        })?;
+
+        let diger = Diger::from_qb64(digest_qb64).map_err(|e| {
+            CoreError::Validation(format!("invalid next-key digest at index {i}: {e}"))
+        })?;
+
+        let matches = diger.verify(verfer.raw()).map_err(|e| {
+            CoreError::Validation(format!(
+                "failed to verify next-key commitment at index {i}: {e}"
+            ))
+        })?;
+
+        if !matches {
+            return Err(CoreError::Validation(format!(
+                "rotation key at index {i} does not match next-key commitment"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 /// Parse a sequence number from its hex string representation.
 fn parse_sn(sn_str: &str) -> Result<u64, CoreError> {
     u64::from_str_radix(sn_str, 16)
@@ -203,7 +265,17 @@ fn parse_backer_threshold(bt_str: &str) -> Result<usize, CoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use affinidi_keri_crypto::Signer;
     use crate::threshold::ThresholdValue;
+
+    /// Create a key qb64 and its next-key digest qb64 from a seed.
+    fn make_key_pair(seed: [u8; 32]) -> (String, String) {
+        let signer = Signer::new("A", seed.to_vec()).unwrap();
+        let verfer = signer.verfer();
+        let key_qb64 = verfer.qb64().unwrap();
+        let digest_qb64 = Diger::from_data("E", verfer.raw()).unwrap().qb64().unwrap();
+        (key_qb64, digest_qb64)
+    }
 
     fn make_inception(prefix: &str, keys: Vec<String>, next_keys: Vec<String>) -> InceptionEvent {
         InceptionEvent {
@@ -225,31 +297,36 @@ mod tests {
 
     #[test]
     fn test_key_state_from_inception() {
-        let icp = make_inception(
-            "PREFIX",
-            vec!["DKey1".into()],
-            vec!["EDigest1".into()],
-        );
+        let (key, digest) = make_key_pair([1u8; 32]);
+        let icp = make_inception("PREFIX", vec![key.clone()], vec![digest.clone()]);
         let state = KeyState::from_inception(&icp).unwrap();
         assert_eq!(state.prefix, "PREFIX");
         assert_eq!(state.sn, 0);
         assert_eq!(state.said, "SAID_ICP");
-        assert_eq!(state.keys, vec!["DKey1"]);
-        assert_eq!(state.next_keys, vec!["EDigest1"]);
+        assert_eq!(state.keys, vec![key]);
+        assert_eq!(state.next_keys, vec![digest]);
         assert_eq!(state.threshold, Threshold::Simple(1));
         assert!(!state.delegated);
     }
 
     #[test]
     fn test_key_state_from_inception_non_zero_sn() {
-        let mut icp = make_inception("PREFIX", vec!["DKey1".into()], vec!["EDigest1".into()]);
+        let (key, digest) = make_key_pair([1u8; 32]);
+        let mut icp = make_inception("PREFIX", vec![key], vec![digest]);
         icp.sn = "1".into();
         assert!(KeyState::from_inception(&icp).is_err());
     }
 
     #[test]
     fn test_apply_rotation() {
-        let icp = make_inception("PREFIX", vec!["DKey1".into()], vec!["EDigest1".into()]);
+        // Inception key pair
+        let (icp_key, _) = make_key_pair([1u8; 32]);
+        // Next key pair — committed in inception, revealed in rotation
+        let (next_key, next_digest) = make_key_pair([2u8; 32]);
+        // Key pair for the rotation's own next commitment
+        let (_, next_next_digest) = make_key_pair([3u8; 32]);
+
+        let icp = make_inception("PREFIX", vec![icp_key], vec![next_digest]);
         let state = KeyState::from_inception(&icp).unwrap();
 
         let rot = RotationEvent {
@@ -260,9 +337,9 @@ mod tests {
             sn: "1".into(),
             prior_said: "SAID_ICP".into(),
             keys_threshold: ThresholdValue::from(1usize),
-            keys: vec!["DNewKey".into()],
+            keys: vec![next_key.clone()],
             next_threshold: ThresholdValue::from(1usize),
-            next_keys: vec!["ENewDigest".into()],
+            next_keys: vec![next_next_digest.clone()],
             backer_threshold: "0".into(),
             backers_remove: vec![],
             backers_add: vec![],
@@ -272,15 +349,91 @@ mod tests {
 
         let new_state = state.apply_rotation(&rot).unwrap();
         assert_eq!(new_state.sn, 1);
-        assert_eq!(new_state.keys, vec!["DNewKey"]);
-        assert_eq!(new_state.next_keys, vec!["ENewDigest"]);
+        assert_eq!(new_state.keys, vec![next_key]);
+        assert_eq!(new_state.next_keys, vec![next_next_digest]);
         assert_eq!(new_state.said, "SAID_ROT");
         assert_eq!(new_state.last_event_digest, "SAID_ROT");
     }
 
     #[test]
+    fn test_apply_rotation_wrong_key_commitment() {
+        let (icp_key, _) = make_key_pair([1u8; 32]);
+        let (_, next_digest) = make_key_pair([2u8; 32]);
+        // Use a different key that does NOT match the committed digest
+        let (wrong_key, _) = make_key_pair([99u8; 32]);
+        let (_, next_next_digest) = make_key_pair([3u8; 32]);
+
+        let icp = make_inception("PREFIX", vec![icp_key], vec![next_digest]);
+        let state = KeyState::from_inception(&icp).unwrap();
+
+        let rot = RotationEvent {
+            version: "KERI10JSON000000_".into(),
+            ilk: "rot".into(),
+            said: "SAID_ROT".into(),
+            prefix: "PREFIX".into(),
+            sn: "1".into(),
+            prior_said: "SAID_ICP".into(),
+            keys_threshold: ThresholdValue::from(1usize),
+            keys: vec![wrong_key],
+            next_threshold: ThresholdValue::from(1usize),
+            next_keys: vec![next_next_digest],
+            backer_threshold: "0".into(),
+            backers_remove: vec![],
+            backers_add: vec![],
+            config: vec![],
+            anchors: vec![],
+        };
+
+        let err = state.apply_rotation(&rot).unwrap_err();
+        assert!(
+            err.to_string().contains("does not match next-key commitment"),
+            "expected commitment mismatch error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_apply_rotation_wrong_key_count() {
+        let (icp_key, _) = make_key_pair([1u8; 32]);
+        let (_, next_digest) = make_key_pair([2u8; 32]);
+        let (next_key, _) = make_key_pair([2u8; 32]);
+        let (extra_key, _) = make_key_pair([4u8; 32]);
+        let (_, next_next_digest) = make_key_pair([3u8; 32]);
+
+        let icp = make_inception("PREFIX", vec![icp_key], vec![next_digest]);
+        let state = KeyState::from_inception(&icp).unwrap();
+
+        let rot = RotationEvent {
+            version: "KERI10JSON000000_".into(),
+            ilk: "rot".into(),
+            said: "SAID_ROT".into(),
+            prefix: "PREFIX".into(),
+            sn: "1".into(),
+            prior_said: "SAID_ICP".into(),
+            keys_threshold: ThresholdValue::from(1usize),
+            keys: vec![next_key, extra_key],
+            next_threshold: ThresholdValue::from(1usize),
+            next_keys: vec![next_next_digest],
+            backer_threshold: "0".into(),
+            backers_remove: vec![],
+            backers_add: vec![],
+            config: vec![],
+            anchors: vec![],
+        };
+
+        let err = state.apply_rotation(&rot).unwrap_err();
+        assert!(
+            err.to_string().contains("does not match next-key commitment count"),
+            "expected count mismatch error, got: {err}"
+        );
+    }
+
+    #[test]
     fn test_apply_rotation_wrong_sn() {
-        let icp = make_inception("PREFIX", vec!["DKey1".into()], vec!["EDigest1".into()]);
+        let (icp_key, _) = make_key_pair([1u8; 32]);
+        let (next_key, next_digest) = make_key_pair([2u8; 32]);
+        let (_, next_next_digest) = make_key_pair([3u8; 32]);
+
+        let icp = make_inception("PREFIX", vec![icp_key], vec![next_digest]);
         let state = KeyState::from_inception(&icp).unwrap();
 
         let rot = RotationEvent {
@@ -291,9 +444,9 @@ mod tests {
             sn: "5".into(), // should be 1
             prior_said: "SAID_ICP".into(),
             keys_threshold: ThresholdValue::from(1usize),
-            keys: vec!["DNewKey".into()],
+            keys: vec![next_key],
             next_threshold: ThresholdValue::from(1usize),
-            next_keys: vec!["ENewDigest".into()],
+            next_keys: vec![next_next_digest],
             backer_threshold: "0".into(),
             backers_remove: vec![],
             backers_add: vec![],
@@ -306,7 +459,11 @@ mod tests {
 
     #[test]
     fn test_apply_rotation_wrong_prior() {
-        let icp = make_inception("PREFIX", vec!["DKey1".into()], vec!["EDigest1".into()]);
+        let (icp_key, _) = make_key_pair([1u8; 32]);
+        let (next_key, next_digest) = make_key_pair([2u8; 32]);
+        let (_, next_next_digest) = make_key_pair([3u8; 32]);
+
+        let icp = make_inception("PREFIX", vec![icp_key], vec![next_digest]);
         let state = KeyState::from_inception(&icp).unwrap();
 
         let rot = RotationEvent {
@@ -317,9 +474,9 @@ mod tests {
             sn: "1".into(),
             prior_said: "WRONG_PRIOR".into(),
             keys_threshold: ThresholdValue::from(1usize),
-            keys: vec!["DNewKey".into()],
+            keys: vec![next_key],
             next_threshold: ThresholdValue::from(1usize),
-            next_keys: vec!["ENewDigest".into()],
+            next_keys: vec![next_next_digest],
             backer_threshold: "0".into(),
             backers_remove: vec![],
             backers_add: vec![],
@@ -332,7 +489,10 @@ mod tests {
 
     #[test]
     fn test_apply_interaction() {
-        let icp = make_inception("PREFIX", vec!["DKey1".into()], vec!["EDigest1".into()]);
+        let (icp_key, _) = make_key_pair([1u8; 32]);
+        let (_, next_digest) = make_key_pair([2u8; 32]);
+
+        let icp = make_inception("PREFIX", vec![icp_key.clone()], vec![next_digest.clone()]);
         let state = KeyState::from_inception(&icp).unwrap();
 
         let ixn = InteractionEvent {
@@ -348,14 +508,16 @@ mod tests {
         let new_state = state.apply_interaction(&ixn).unwrap();
         assert_eq!(new_state.sn, 1);
         assert_eq!(new_state.last_event_digest, "SAID_IXN");
-        // Keys should be unchanged after interaction
-        assert_eq!(new_state.keys, vec!["DKey1"]);
-        assert_eq!(new_state.next_keys, vec!["EDigest1"]);
+        assert_eq!(new_state.keys, vec![icp_key]);
+        assert_eq!(new_state.next_keys, vec![next_digest]);
     }
 
     #[test]
     fn test_apply_interaction_wrong_sn() {
-        let icp = make_inception("PREFIX", vec!["DKey1".into()], vec!["EDigest1".into()]);
+        let (icp_key, _) = make_key_pair([1u8; 32]);
+        let (_, next_digest) = make_key_pair([2u8; 32]);
+
+        let icp = make_inception("PREFIX", vec![icp_key], vec![next_digest]);
         let state = KeyState::from_inception(&icp).unwrap();
 
         let ixn = InteractionEvent {
@@ -373,7 +535,11 @@ mod tests {
 
     #[test]
     fn test_rotation_with_witness_changes() {
-        let mut icp = make_inception("PREFIX", vec!["DKey1".into()], vec!["EDigest1".into()]);
+        let (icp_key, _) = make_key_pair([1u8; 32]);
+        let (next_key, next_digest) = make_key_pair([2u8; 32]);
+        let (_, next_next_digest) = make_key_pair([3u8; 32]);
+
+        let mut icp = make_inception("PREFIX", vec![icp_key], vec![next_digest]);
         icp.backers = vec!["BWit1".into(), "BWit2".into()];
         icp.backer_threshold = "2".into();
         let state = KeyState::from_inception(&icp).unwrap();
@@ -387,9 +553,9 @@ mod tests {
             sn: "1".into(),
             prior_said: "SAID_ICP".into(),
             keys_threshold: ThresholdValue::from(1usize),
-            keys: vec!["DNewKey".into()],
+            keys: vec![next_key],
             next_threshold: ThresholdValue::from(1usize),
-            next_keys: vec!["ENewDigest".into()],
+            next_keys: vec![next_next_digest],
             backer_threshold: "2".into(),
             backers_remove: vec!["BWit1".into()],
             backers_add: vec!["BWit3".into()],

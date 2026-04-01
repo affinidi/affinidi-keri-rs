@@ -95,15 +95,30 @@ impl Threshold {
                 let n: usize = s
                     .parse()
                     .map_err(|_| CoreError::Validation(format!("invalid threshold string: {s}")))?;
+                if n == 0 {
+                    return Err(CoreError::Validation(
+                        "signing threshold must be at least 1".into(),
+                    ));
+                }
                 Ok(Threshold::Simple(n))
             }
             serde_json::Value::Number(n) => {
                 let n = n.as_u64().ok_or_else(|| {
                     CoreError::Validation(format!("invalid threshold number: {n}"))
                 })?;
+                if n == 0 {
+                    return Err(CoreError::Validation(
+                        "signing threshold must be at least 1".into(),
+                    ));
+                }
                 Ok(Threshold::Simple(n as usize))
             }
             serde_json::Value::Array(clauses) => {
+                if clauses.is_empty() {
+                    return Err(CoreError::Validation(
+                        "weighted threshold must have at least one clause".into(),
+                    ));
+                }
                 let mut weighted = Vec::new();
                 for clause in clauses {
                     let arr = clause.as_array().ok_or_else(|| {
@@ -111,6 +126,11 @@ impl Threshold {
                             "weighted threshold clause must be an array".into(),
                         )
                     })?;
+                    if arr.is_empty() {
+                        return Err(CoreError::Validation(
+                            "weighted threshold clause must have at least one weight".into(),
+                        ));
+                    }
                     let mut weights = Vec::new();
                     for w in arr {
                         let s = w.as_str().ok_or_else(|| {
@@ -160,8 +180,11 @@ impl Threshold {
     /// The `total_keys` parameter is the total number of keys in the key set.
     pub fn is_satisfied(&self, indices: &[usize], total_keys: usize) -> bool {
         match self {
-            Threshold::Simple(k) => indices.len() >= *k,
+            Threshold::Simple(k) => *k > 0 && indices.len() >= *k,
             Threshold::Weighted(clauses) => {
+                if clauses.is_empty() {
+                    return false;
+                }
                 // Build a flat list of all weights across clauses, indexed by key position.
                 // Each clause must be independently satisfied.
                 let mut key_idx = 0;
@@ -173,9 +196,21 @@ impl Threshold {
                     for weight in clause {
                         if key_idx < total_keys && indices.contains(&key_idx) {
                             // Add this weight: total_num/total_den += weight.num/weight.den
-                            total_num =
-                                total_num * weight.den as u64 + weight.num as u64 * total_den;
-                            total_den *= weight.den as u64;
+                            // Use checked arithmetic to prevent overflow attacks.
+                            let Some(a) = total_num.checked_mul(weight.den as u64) else {
+                                return false;
+                            };
+                            let Some(b) = (weight.num as u64).checked_mul(total_den) else {
+                                return false;
+                            };
+                            let Some(new_num) = a.checked_add(b) else {
+                                return false;
+                            };
+                            let Some(new_den) = total_den.checked_mul(weight.den as u64) else {
+                                return false;
+                            };
+                            total_num = new_num;
+                            total_den = new_den;
                         }
                         key_idx += 1;
                     }
@@ -368,5 +403,40 @@ mod tests {
         ]]);
         let v = t.to_json_value();
         assert_eq!(v, serde_json::json!([["1/2", "1/3"]]));
+    }
+
+    #[test]
+    fn test_zero_simple_threshold_rejected() {
+        let v = serde_json::json!("0");
+        assert!(Threshold::from_json_value(&v).is_err());
+
+        let v = serde_json::json!(0);
+        assert!(Threshold::from_json_value(&v).is_err());
+    }
+
+    #[test]
+    fn test_zero_simple_threshold_is_satisfied_defense() {
+        // Even if a Simple(0) is constructed directly, is_satisfied rejects it.
+        let t = Threshold::Simple(0);
+        assert!(!t.is_satisfied(&[], 0));
+        assert!(!t.is_satisfied(&[0], 1));
+    }
+
+    #[test]
+    fn test_empty_weighted_threshold_rejected() {
+        // Empty clause list
+        let v = serde_json::json!([]);
+        assert!(Threshold::from_json_value(&v).is_err());
+
+        // Clause with empty weight list
+        let v = serde_json::json!([[]]);
+        assert!(Threshold::from_json_value(&v).is_err());
+    }
+
+    #[test]
+    fn test_empty_weighted_is_satisfied_defense() {
+        let t = Threshold::Weighted(vec![]);
+        assert!(!t.is_satisfied(&[], 0));
+        assert!(!t.is_satisfied(&[0], 1));
     }
 }

@@ -59,6 +59,11 @@ pub enum JudgeResult {
 /// The `duplicitous` set and `del` vector are maintained together: any prefix
 /// in `duplicitous` has at least one entry in `del`, and vice versa. All
 /// mutations go through [`record_duplicity`](Self::record_duplicity).
+///
+/// # Security
+/// TODO: Duplicity evidence (`del`, `duplicitous`) is held only in memory.
+/// On restart all evidence is lost, allowing previously-detected duplicitous
+/// events to be replayed and accepted. Persist duplicity state to the store.
 pub struct Judge {
     store: Box<dyn KeriStore>,
     kevers: HashMap<String, Kever>,

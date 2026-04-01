@@ -27,6 +27,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `affinidi-cesr` crate removed from the workspace (functionality consolidated elsewhere).
 
+## [0.1.1] - 2026-04-02
+
+### Security
+
+- **[CRITICAL]** Add SAID verification to all Kever event processing paths (`new`, `new_from_parts`, `update`, `verify_update`, `verify_update_owned`). Previously, event contents could be tampered with after SAID computation without detection.
+- **[CRITICAL]** Use constant-time comparison (`subtle::ConstantTimeEq`) for digest verification in `Diger::verify()` and prefix verification in `Prefixer::verify_basic()`/`verify_self_addressing()`. Previously used `==` which leaks timing information.
+- **[CRITICAL]** Fix integer overflow in weighted threshold calculation (`threshold.rs`). Attacker-crafted weights with large denominators could overflow `u64` arithmetic, bypassing signature thresholds. Now uses checked arithmetic.
+- **[CRITICAL]** Add next-key commitment verification in `KeyState::apply_rotation()`. Rotation keys are now hashed and verified against the prior establishment event's next-key digests, enforcing KERI's pre-rotation security guarantee.
+- **[HIGH]** Fix state-before-persist ordering in direct mode. `apply_verified_update()` now runs after `store_event()`, preventing in-memory/storage divergence on DB write failure.
+- **[HIGH]** Validate backer threshold against backer count in `from_inception()` and `apply_rotation()`. Prevents setting an unsatisfiable witness threshold.
+- **[HIGH]** Remove `Clone` from `Signer` and `ZeroVec`. Cloning a `Signer` previously created an unzeroized copy of private key material in memory.
+- **[HIGH]** `KeyEvent::sn()` now returns `Result` instead of silently masking parse failures as sequence number 0 via `unwrap_or(0)`.
+- **[HIGH]** Remove non-atomic default `store_event`/`store_event_with_hab` from `KeriStore` trait. Implementations must now provide their own atomic transaction logic.
+- **[HIGH]** Add escrow size limits (10K total entries, 16 per key, 4096 witness receipts per entry) to prevent memory exhaustion.
+- **[HIGH]** Reject zero signing thresholds at parse time (`kt: "0"`) and as defense-in-depth in `is_satisfied()`. Previously, a zero threshold was always satisfied regardless of signatures.
+- **[HIGH]** Add parser allocation bounds: hard cap of 4096 primitives per attachment group plus data-length sanity checks before `Vec::with_capacity(count)`. Prevents OOM from malicious CESR counter values.
+- **[MEDIUM]** Sanitize crypto error messages in `Verfer` and `Signer` to avoid leaking internal library details.
+- **[MEDIUM]** Document missing delegation seal verification (TODO) and volatile judge duplicity state (TODO).
+
+### Changed
+
+- `affinidi-cesr` dependency now loaded from crates.io (`0.1.0`) instead of a local path.
+- Added `subtle = "2"` as a workspace dependency for constant-time operations.
+
 ## [0.1.0] - 2026-03-04
 
 ### Added

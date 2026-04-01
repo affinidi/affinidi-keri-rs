@@ -9,7 +9,9 @@ use affinidi_keri_crypto::{Siger, Verfer};
 use crate::error::CoreError;
 use crate::event::{InceptionEvent, InteractionEvent, RotationEvent};
 use crate::key_state::KeyState;
+use crate::said;
 use crate::serder::Serder;
+use crate::version::SerializationKind;
 
 /// Key Event Verifier for a single KERI identifier.
 ///
@@ -41,6 +43,9 @@ impl Kever {
                 "expected 'icp', got '{ilk}'"
             )));
         }
+
+        // Verify SAID integrity before trusting any event fields
+        serder.verify_said("E")?;
 
         // Parse the inception event from the SAD
         let icp: InceptionEvent =
@@ -102,6 +107,9 @@ impl Kever {
             )));
         }
 
+        // Verify SAID integrity before trusting any event fields
+        said::verify_said(&sad, "d", "E", SerializationKind::Json)?;
+
         let icp: InceptionEvent =
             serde_json::from_value(sad).map_err(CoreError::Json)?;
 
@@ -147,6 +155,9 @@ impl Kever {
                 "kever not initialized with inception event".into(),
             ));
         }
+
+        // Verify SAID integrity before trusting any event fields
+        serder.verify_said("E")?;
 
         let ilk = serder.ilk()?;
         let sn = serder.sn()?;
@@ -208,6 +219,9 @@ impl Kever {
             ));
         }
 
+        // Verify SAID integrity before trusting any event fields
+        serder.verify_said("E")?;
+
         let ilk = serder.ilk()?;
         let sn = serder.sn()?;
 
@@ -257,6 +271,9 @@ impl Kever {
                 "kever not initialized with inception event".into(),
             ));
         }
+
+        // Verify SAID integrity before trusting any event fields
+        said::verify_said(&sad, "d", "E", SerializationKind::Json)?;
 
         let ilk = sad
             .get("t")
@@ -454,20 +471,43 @@ mod tests {
         Signer::new("A", seed.to_vec()).unwrap()
     }
 
+    /// Fix the version string size so SAID computation is stable across
+    /// Serder construction. Without this, Serder::new re-serializes with
+    /// a corrected `v` field, changing the raw bytes and invalidating the SAID.
+    fn fix_version_string(sad: &mut serde_json::Value) {
+        let placeholder = "#".repeat(44); // Blake3-256 qb64 length
+        let is_self_addressing = sad.get("d") == sad.get("i");
+        let orig_d = sad["d"].clone();
+        let orig_i = sad["i"].clone();
+        sad["d"] = serde_json::Value::String(placeholder.clone());
+        if is_self_addressing {
+            sad["i"] = serde_json::Value::String(placeholder);
+        }
+        let temp_raw = serde_json::to_vec(sad).unwrap();
+        sad["v"] = serde_json::Value::String(format!("KERI10JSON{:06x}_", temp_raw.len()));
+        sad["d"] = orig_d;
+        sad["i"] = orig_i;
+    }
+
+    /// Compute the next-key digest for a signer (Blake3-256 of raw public key).
+    fn next_key_digest(signer: &Signer) -> String {
+        Diger::from_data("E", signer.verfer().raw())
+            .unwrap()
+            .qb64()
+            .unwrap()
+    }
+
     /// Helper: build an inception event SAD, compute its SAID, and return the Serder.
-    fn build_inception_serder(signers: &[&Signer]) -> Serder {
+    /// `next_signers` are the keys committed to for the first rotation.
+    fn build_inception_serder(signers: &[&Signer], next_signers: &[&Signer]) -> Serder {
         let keys: Vec<String> = signers
             .iter()
             .map(|s| s.verfer().qb64().unwrap())
             .collect();
 
-        // Compute next key digests (use Blake3 digest of each key)
-        let next_keys: Vec<String> = keys
+        let next_keys: Vec<String> = next_signers
             .iter()
-            .map(|k| {
-                let diger = Diger::from_data("E", k.as_bytes()).unwrap();
-                diger.qb64().unwrap()
-            })
+            .map(|s| next_key_digest(s))
             .collect();
 
         let mut sad = serde_json::json!({
@@ -486,28 +526,29 @@ mod tests {
             "a": []
         });
 
+        fix_version_string(&mut sad);
         said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
         Serder::new(SerializationKind::Json, sad).unwrap()
     }
 
     /// Helper: build a rotation event Serder.
+    /// `signers` are the new current signing keys.
+    /// `next_signers` are the keys committed to for the next rotation.
     fn build_rotation_serder(
         prefix: &str,
         sn: u64,
         prior_said: &str,
         signers: &[&Signer],
+        next_signers: &[&Signer],
     ) -> Serder {
         let keys: Vec<String> = signers
             .iter()
             .map(|s| s.verfer().qb64().unwrap())
             .collect();
 
-        let next_keys: Vec<String> = keys
+        let next_keys: Vec<String> = next_signers
             .iter()
-            .map(|k| {
-                let diger = Diger::from_data("E", k.as_bytes()).unwrap();
-                diger.qb64().unwrap()
-            })
+            .map(|s| next_key_digest(s))
             .collect();
 
         let mut sad = serde_json::json!({
@@ -528,6 +569,7 @@ mod tests {
             "a": []
         });
 
+        fix_version_string(&mut sad);
         said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
         Serder::new(SerializationKind::Json, sad).unwrap()
     }
@@ -544,6 +586,7 @@ mod tests {
             "a": []
         });
 
+        fix_version_string(&mut sad);
         said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
         Serder::new(SerializationKind::Json, sad).unwrap()
     }
@@ -551,7 +594,8 @@ mod tests {
     #[test]
     fn test_kever_inception() {
         let signer = make_signer(42);
-        let serder = build_inception_serder(&[&signer]);
+        let next_signer = make_signer(43);
+        let serder = build_inception_serder(&[&signer], &[&next_signer]);
 
         let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
         let verfer = signer.verfer().clone();
@@ -584,7 +628,8 @@ mod tests {
     fn test_kever_inception_bad_sig() {
         let signer = make_signer(42);
         let wrong_signer = make_signer(99);
-        let serder = build_inception_serder(&[&signer]);
+        let next_signer = make_signer(43);
+        let serder = build_inception_serder(&[&signer], &[&next_signer]);
 
         // Sign with the wrong key
         let sig = wrong_signer.sign_indexed(serder.raw(), 0, true).unwrap();
@@ -596,7 +641,8 @@ mod tests {
     #[test]
     fn test_kever_inception_and_signature_verification() {
         let signer = make_signer(42);
-        let serder = build_inception_serder(&[&signer]);
+        let next_signer = make_signer(43);
+        let serder = build_inception_serder(&[&signer], &[&next_signer]);
         let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
         let verfer = signer.verfer().clone();
 
@@ -612,9 +658,10 @@ mod tests {
     fn test_kever_rotation() {
         let signer1 = make_signer(42);
         let signer2 = make_signer(99);
+        let signer3 = make_signer(77);
 
-        // Inception with signer1
-        let icp_serder = build_inception_serder(&[&signer1]);
+        // Inception with signer1, committing to signer2 as the next key
+        let icp_serder = build_inception_serder(&[&signer1], &[&signer2]);
         let icp_sig = signer1.sign_indexed(icp_serder.raw(), 0, true).unwrap();
         let verfer1 = signer1.verfer().clone();
 
@@ -623,8 +670,9 @@ mod tests {
         let prefix = kever.prefix().to_string();
         let prior_said = kever.state().last_event_digest.clone();
 
-        // Rotation to signer2
-        let rot_serder = build_rotation_serder(&prefix, 1, &prior_said, &[&signer2]);
+        // Rotation to signer2, committing to signer3 for next rotation
+        let rot_serder =
+            build_rotation_serder(&prefix, 1, &prior_said, &[&signer2], &[&signer3]);
 
         // Sign rotation with CURRENT keys (signer1)
         let rot_sig = signer1.sign_indexed(rot_serder.raw(), 0, true).unwrap();
@@ -639,9 +687,10 @@ mod tests {
     #[test]
     fn test_kever_interaction() {
         let signer = make_signer(42);
+        let next_signer = make_signer(43);
 
         // Inception
-        let icp_serder = build_inception_serder(&[&signer]);
+        let icp_serder = build_inception_serder(&[&signer], &[&next_signer]);
         let icp_sig = signer.sign_indexed(icp_serder.raw(), 0, true).unwrap();
         let verfer = signer.verfer().clone();
 
@@ -664,8 +713,9 @@ mod tests {
     #[test]
     fn test_kever_out_of_order() {
         let signer = make_signer(42);
+        let next_signer = make_signer(43);
 
-        let icp_serder = build_inception_serder(&[&signer]);
+        let icp_serder = build_inception_serder(&[&signer], &[&next_signer]);
         let icp_sig = signer.sign_indexed(icp_serder.raw(), 0, true).unwrap();
         let verfer = signer.verfer().clone();
 
@@ -805,12 +855,9 @@ mod tests {
             .map(|s| s.verfer().qb64().unwrap())
             .collect();
 
-        let next_keys: Vec<String> = keys
+        let next_keys: Vec<String> = [&signer1, &signer2, &signer3]
             .iter()
-            .map(|k| {
-                let diger = Diger::from_data("E", k.as_bytes()).unwrap();
-                diger.qb64().unwrap()
-            })
+            .map(|s| next_key_digest(s))
             .collect();
 
         let mut sad = serde_json::json!({
@@ -828,6 +875,7 @@ mod tests {
             "c": [],
             "a": []
         });
+        fix_version_string(&mut sad);
         said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
         let serder = Serder::new(SerializationKind::Json, sad).unwrap();
 

@@ -6,6 +6,8 @@
 //! - A **self-addressing** prefix: a digest (SAID) of the inception event data
 
 use affinidi_cesr::Matter;
+use subtle::ConstantTimeEq;
+
 use crate::diger::Diger;
 use crate::error::CryptoError;
 use crate::verfer::Verfer;
@@ -77,14 +79,16 @@ impl Prefixer {
 
     /// Verify that this prefix matches a given verfer (for basic prefixes).
     pub fn verify_basic(&self, verfer: &Verfer) -> bool {
-        self.matter.code() == verfer.code() && self.matter.raw() == verfer.raw()
+        let code_eq = self.matter.code().as_bytes().ct_eq(verfer.code().as_bytes());
+        let raw_eq = self.matter.raw().ct_eq(verfer.raw());
+        (code_eq & raw_eq).into()
     }
 
     /// Verify that this prefix matches the SAID of given key event data
     /// (for self-addressing prefixes).
     pub fn verify_self_addressing(&self, ked: &[u8]) -> Result<bool, CryptoError> {
         let diger = Diger::from_data(self.matter.code(), ked)?;
-        Ok(diger.raw() == self.matter.raw())
+        Ok(diger.raw().ct_eq(self.matter.raw()).into())
     }
 }
 

@@ -11,6 +11,13 @@ use affinidi_keri_crypto::Siger;
 use crate::error::CoreError;
 use crate::serder::Serder;
 
+/// Maximum number of primitives allowed per attachment group.
+/// Prevents memory exhaustion from malicious counter values.
+const MAX_ATTACHMENT_COUNT: usize = 4096;
+
+/// Minimum size in bytes of a single CESR primitive (smallest qb64 code).
+const MIN_PRIMITIVE_SIZE: usize = 4;
+
 /// A receipt couple: (prefix qb64, signature raw bytes).
 type ReceiptCouple = (String, Vec<u8>);
 
@@ -165,6 +172,19 @@ fn parse_attachments(data: &[u8]) -> Result<(Vec<Attachment>, usize), CoreError>
 
 /// Parse `count` indexed signatures from the data.
 fn parse_indexed_sigs(data: &[u8], count: usize) -> Result<(Vec<Siger>, usize), CoreError> {
+    if count > MAX_ATTACHMENT_COUNT {
+        return Err(CoreError::ParseError(format!(
+            "indexed sig count {count} exceeds maximum of {MAX_ATTACHMENT_COUNT}"
+        )));
+    }
+    if count * MIN_PRIMITIVE_SIZE > data.len() {
+        return Err(CoreError::ParseError(format!(
+            "indexed sig count {count} requires at least {} bytes, but only {} available",
+            count * MIN_PRIMITIVE_SIZE,
+            data.len()
+        )));
+    }
+
     let text = std::str::from_utf8(data)
         .map_err(|_| CoreError::ParseError("indexed sig data is not valid UTF-8".into()))?;
 
@@ -230,6 +250,20 @@ fn parse_receipt_couples(
     data: &[u8],
     count: usize,
 ) -> Result<(Vec<ReceiptCouple>, usize), CoreError> {
+    if count > MAX_ATTACHMENT_COUNT {
+        return Err(CoreError::ParseError(format!(
+            "receipt couple count {count} exceeds maximum of {MAX_ATTACHMENT_COUNT}"
+        )));
+    }
+    // Each couple contains two primitives.
+    if count * MIN_PRIMITIVE_SIZE * 2 > data.len() {
+        return Err(CoreError::ParseError(format!(
+            "receipt couple count {count} requires at least {} bytes, but only {} available",
+            count * MIN_PRIMITIVE_SIZE * 2,
+            data.len()
+        )));
+    }
+
     let text = std::str::from_utf8(data)
         .map_err(|_| CoreError::ParseError("receipt couple data is not valid UTF-8".into()))?;
 
@@ -313,6 +347,19 @@ fn parse_matter_qb64(
 /// Skip `count` primitives for unrecognized counter codes.
 /// Returns the raw bytes and count of characters consumed.
 fn skip_counted_primitives(data: &[u8], count: usize) -> Result<(Vec<u8>, usize), CoreError> {
+    if count > MAX_ATTACHMENT_COUNT {
+        return Err(CoreError::ParseError(format!(
+            "primitive count {count} exceeds maximum of {MAX_ATTACHMENT_COUNT}"
+        )));
+    }
+    if count * MIN_PRIMITIVE_SIZE > data.len() {
+        return Err(CoreError::ParseError(format!(
+            "primitive count {count} requires at least {} bytes, but only {} available",
+            count * MIN_PRIMITIVE_SIZE,
+            data.len()
+        )));
+    }
+
     let text = std::str::from_utf8(data)
         .map_err(|_| CoreError::ParseError("data is not valid UTF-8".into()))?;
 

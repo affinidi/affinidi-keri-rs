@@ -117,8 +117,12 @@ pub trait KeriStore: Send + Sync {
     // --- Batch operations ---
 
     /// Store an event with its KEL entry, first-seen record, and optional signatures
-    /// in a single logical operation. The default implementation calls individual
-    /// methods (one transaction each); backends may override for atomicity/performance.
+    /// in a single atomic operation.
+    ///
+    /// # Safety
+    /// Implementations **must** perform all writes within a single transaction.
+    /// Partial writes (e.g. event stored but KEL entry missing) leave the
+    /// database in an inconsistent state that can cause panics on reload.
     fn store_event(
         &self,
         said: &str,
@@ -126,18 +130,12 @@ pub trait KeriStore: Send + Sync {
         prefix: &str,
         sn: u64,
         sigs: Option<&[u8]>,
-    ) -> Result<(), DbError> {
-        self.put_event(said, event)?;
-        self.append_kel(prefix, sn, said)?;
-        self.put_first_seen(prefix, sn, said)?;
-        if let Some(s) = sigs {
-            self.put_signatures(said, s)?;
-        }
-        Ok(())
-    }
+    ) -> Result<(), DbError>;
 
     /// Store an event (as in [`store_event`](Self::store_event)) plus hab metadata
-    /// in a single logical operation.
+    /// in a single atomic operation.
+    ///
+    /// See [`store_event`](Self::store_event) for atomicity requirements.
     fn store_event_with_hab(
         &self,
         said: &str,
@@ -147,9 +145,5 @@ pub trait KeriStore: Send + Sync {
         sigs: Option<&[u8]>,
         hab_name: &str,
         hab_data: &[u8],
-    ) -> Result<(), DbError> {
-        self.store_event(said, event, prefix, sn, sigs)?;
-        self.put_hab(hab_name, hab_data)?;
-        Ok(())
-    }
+    ) -> Result<(), DbError>;
 }

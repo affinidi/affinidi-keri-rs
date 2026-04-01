@@ -92,13 +92,10 @@ impl Verfer {
         })?;
 
         let verifying_key = VerifyingKey::from_bytes(&key_bytes)
-            .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+            .map_err(|_| CryptoError::InvalidKey("invalid Ed25519 public key".into()))?;
 
         let sig_bytes: [u8; 64] = signature.try_into().map_err(|_| {
-            CryptoError::InvalidSignature(format!(
-                "expected 64 bytes, got {}",
-                signature.len()
-            ))
+            CryptoError::InvalidSignature("invalid Ed25519 signature length".into())
         })?;
         let sig = Signature::from_bytes(&sig_bytes);
 
@@ -113,10 +110,10 @@ impl Verfer {
         use k256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 
         let verifying_key = VerifyingKey::from_sec1_bytes(self.matter.raw())
-            .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+            .map_err(|_| CryptoError::InvalidKey("invalid secp256k1 public key".into()))?;
 
         let sig = Signature::from_slice(signature)
-            .map_err(|e| CryptoError::InvalidSignature(e.to_string()))?;
+            .map_err(|_| CryptoError::InvalidSignature("invalid secp256k1 signature".into()))?;
 
         match verifying_key.verify(message, &sig) {
             Ok(()) => Ok(true),
@@ -129,10 +126,10 @@ impl Verfer {
         use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 
         let verifying_key = VerifyingKey::from_sec1_bytes(self.matter.raw())
-            .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+            .map_err(|_| CryptoError::InvalidKey("invalid secp256r1 public key".into()))?;
 
         let sig = Signature::from_slice(signature)
-            .map_err(|e| CryptoError::InvalidSignature(e.to_string()))?;
+            .map_err(|_| CryptoError::InvalidSignature("invalid secp256r1 signature".into()))?;
 
         match verifying_key.verify(message, &sig) {
             Ok(()) => Ok(true),

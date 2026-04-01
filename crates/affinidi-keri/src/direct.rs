@@ -150,12 +150,14 @@ pub fn process_parsed(
                     )?;
                 }
 
-                // All checks passed — commit the update
-                kever.apply_verified_update(new_state);
-
+                // Persist to storage BEFORE updating in-memory state.
+                // If the DB write fails, the Kever remains at its prior state.
                 let sigs =
                     if raw_sig_bytes.is_empty() { None } else { Some(raw_sig_bytes.as_slice()) };
                 store.store_event(&said, parsed.serder.raw(), &prefix, sn, sigs)?;
+
+                // Storage succeeded — now commit the in-memory update
+                kever.apply_verified_update(new_state);
             }
             // If no kever exists, in direct mode we skip
             // (a full implementation would escrow)

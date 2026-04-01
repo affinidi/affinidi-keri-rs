@@ -24,7 +24,7 @@ use zeroize::Zeroize;
 ///
 /// Signer wraps a private key with zeroize-on-drop protection and provides
 /// methods to derive the public key (`Verfer`) and to sign messages.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Signer {
     /// The raw private key bytes (zeroized on drop).
     raw: ZeroVec,
@@ -37,7 +37,6 @@ pub struct Signer {
 }
 
 /// A wrapper around `Vec<u8>` that zeroizes on drop.
-#[derive(Clone)]
 struct ZeroVec(Vec<u8>);
 
 impl std::fmt::Debug for ZeroVec {
@@ -161,7 +160,7 @@ impl Signer {
         use k256::ecdsa::{signature::Signer, SigningKey};
 
         let signing_key = SigningKey::from_slice(&self.raw.0)
-            .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+            .map_err(|_| CryptoError::InvalidKey("invalid signing key".into()))?;
         let sig: k256::ecdsa::Signature = signing_key.sign(message);
         Ok(sig.to_bytes().to_vec())
     }
@@ -171,7 +170,7 @@ impl Signer {
         use p256::ecdsa::{signature::Signer, SigningKey};
 
         let signing_key = SigningKey::from_slice(&self.raw.0)
-            .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+            .map_err(|_| CryptoError::InvalidKey("invalid signing key".into()))?;
         let sig: p256::ecdsa::Signature = signing_key.sign(message);
         Ok(sig.to_bytes().to_vec())
     }
@@ -193,7 +192,7 @@ impl Signer {
                 use k256::ecdsa::SigningKey;
 
                 let signing_key = SigningKey::from_slice(raw)
-                    .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+                    .map_err(|_| CryptoError::InvalidKey("invalid signing key".into()))?;
                 let pubkey = signing_key.verifying_key().to_sec1_bytes().to_vec();
                 let verfer_code = if transferable { "1AAB" } else { "1AAA" };
                 Verfer::new(verfer_code, pubkey)
@@ -202,7 +201,7 @@ impl Signer {
                 use p256::ecdsa::SigningKey;
 
                 let signing_key = SigningKey::from_slice(raw)
-                    .map_err(|e| CryptoError::InvalidKey(e.to_string()))?;
+                    .map_err(|_| CryptoError::InvalidKey("invalid signing key".into()))?;
                 let pubkey = signing_key
                     .verifying_key()
                     .to_encoded_point(true)

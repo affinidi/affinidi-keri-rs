@@ -1,6 +1,6 @@
 [package]
 name = "affinidi-keri-crypto"
-version = "0.1.0"
+version = "0.1.1"
 description = "Cryptographic primitives for KERI"
 edition.workspace = true
 rust-version.workspace = true
@@ -20,6 +20,7 @@ argon2 = { workspace = true }
 rand = { workspace = true }
 zeroize = { workspace = true }
 digest = { workspace = true }
+subtle = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

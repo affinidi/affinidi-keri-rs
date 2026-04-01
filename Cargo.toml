@@ -15,7 +15,7 @@ repository = "https://github.com/nicktho/affinidi-keri"
 
 [workspace.dependencies]
 # Internal crates
-affinidi-cesr = { path = "../affinidi-tdk-rs/crates/affinidi-tdk/common/affinidi-cesr" }
+affinidi-cesr = "0.1.0"
 affinidi-keri-crypto = { path = "crates/affinidi-keri-crypto" }
 affinidi-keri-core = { path = "crates/affinidi-keri-core" }
 affinidi-keri-db = { path = "crates/affinidi-keri-db" }
@@ -41,6 +41,7 @@ argon2 = "0.5"
 rand = "0.8"
 zeroize = { version = "1", features = ["derive"] }
 digest = "0.10"
+subtle = "2"
 
 # Encoding
 base64ct = { version = "1", features = ["alloc"] }

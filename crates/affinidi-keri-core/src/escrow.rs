@@ -34,6 +34,17 @@ pub struct EscrowedEvent {
     pub escrowed_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Maximum total entries across all escrow categories to prevent resource exhaustion.
+const MAX_ESCROW_ENTRIES: usize = 10_000;
+
+/// Maximum number of entries per (prefix, sn) key in out-of-order and
+/// partially-signed escrows to prevent per-key resource exhaustion.
+const MAX_ENTRIES_PER_KEY: usize = 16;
+
+/// Maximum number of witness receipts that can be accumulated for a
+/// single partially-witnessed event.
+const MAX_ATTACHMENT_COUNT: usize = 4096;
+
 /// Escrow manager for pending events.
 #[derive(Debug)]
 pub struct Escrow {
@@ -56,10 +67,18 @@ impl Escrow {
         }
     }
 
+    /// Total number of entries across all escrow categories.
+    pub fn total_count(&self) -> usize {
+        self.out_of_order_count()
+            + self.partially_signed_count()
+            + self.partially_witnessed_count()
+    }
+
     /// Add an out-of-order event to escrow.
     ///
     /// Events are stored keyed by (prefix, sn) so they can be retrieved
-    /// when the preceding events arrive.
+    /// when the preceding events arrive. Silently drops the event if
+    /// escrow limits are exceeded.
     pub fn escrow_out_of_order(
         &mut self,
         prefix: &str,
@@ -67,19 +86,26 @@ impl Escrow {
         serder: Serder,
         signatures: Vec<u8>,
     ) {
+        if self.total_count() >= MAX_ESCROW_ENTRIES {
+            return;
+        }
         let key = (prefix.to_string(), sn);
-        let entry = EscrowedEvent {
+        let entries = self.out_of_order.entry(key).or_default();
+        if entries.len() >= MAX_ENTRIES_PER_KEY {
+            return;
+        }
+        entries.push(EscrowedEvent {
             serder,
             signatures,
             escrowed_at: chrono::Utc::now(),
-        };
-        self.out_of_order.entry(key).or_default().push(entry);
+        });
     }
 
     /// Add a partially-signed event to escrow.
     ///
     /// Events are stored until enough signatures accumulate to meet
-    /// the signing threshold.
+    /// the signing threshold. Silently drops the event if
+    /// escrow limits are exceeded.
     pub fn escrow_partially_signed(
         &mut self,
         prefix: &str,
@@ -87,13 +113,19 @@ impl Escrow {
         serder: Serder,
         signatures: Vec<u8>,
     ) {
+        if self.total_count() >= MAX_ESCROW_ENTRIES {
+            return;
+        }
         let key = (prefix.to_string(), sn);
-        let entry = EscrowedEvent {
+        let entries = self.partially_signed.entry(key).or_default();
+        if entries.len() >= MAX_ENTRIES_PER_KEY {
+            return;
+        }
+        entries.push(EscrowedEvent {
             serder,
             signatures,
             escrowed_at: chrono::Utc::now(),
-        };
-        self.partially_signed.entry(key).or_default().push(entry);
+        });
     }
 
     /// Retrieve out-of-order events that are now in sequence.
@@ -128,6 +160,8 @@ impl Escrow {
     /// Add a witness receipt couple to an escrowed partially-witnessed event.
     ///
     /// Returns `true` if the entry was found and the receipt was added.
+    /// Returns `false` if the entry was not found or the receipt limit
+    /// has been reached.
     pub fn add_witness_receipt(
         &mut self,
         prefix: &str,
@@ -137,6 +171,9 @@ impl Escrow {
     ) -> bool {
         let key = (prefix.to_string(), sn);
         if let Some(entry) = self.partially_witnessed.get_mut(&key) {
+            if entry.receipts.len() >= MAX_ATTACHMENT_COUNT {
+                return false;
+            }
             entry.receipts.push((witness_prefix, sig_raw));
             true
         } else {

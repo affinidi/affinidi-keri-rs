@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::CoreError;
 use crate::ilk::Ilk;
 use crate::threshold::ThresholdValue;
 
@@ -140,6 +141,11 @@ pub struct InteractionEvent {
 ///
 /// Same as inception but with an additional `di` field for the delegator prefix.
 /// Field order: v, t, d, i, s, kt, k, nt, n, bt, b, c, a, di
+///
+/// # Security
+/// TODO: Processing delegated events requires verifying that the delegator's
+/// KEL contains an anchored seal authorizing this delegation. Without this
+/// check, any party can claim delegation from any delegator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegatedInceptionEvent {
     /// Version string.
@@ -295,7 +301,10 @@ impl KeyEvent {
     }
 
     /// Return the sequence number as a u64 (parsing the hex string).
-    pub fn sn(&self) -> u64 {
+    ///
+    /// # Errors
+    /// Returns `CoreError::Validation` if the sequence number is not valid hex.
+    pub fn sn(&self) -> Result<u64, CoreError> {
         let sn_str = match self {
             Self::Inception(e) => &e.sn,
             Self::Rotation(e) => &e.sn,
@@ -303,7 +312,8 @@ impl KeyEvent {
             Self::DelegatedInception(e) => &e.sn,
             Self::DelegatedRotation(e) => &e.sn,
         };
-        u64::from_str_radix(sn_str, 16).unwrap_or(0)
+        u64::from_str_radix(sn_str, 16)
+            .map_err(|_| CoreError::Validation(format!("invalid sequence number: {sn_str}")))
     }
 
     /// Return the prefix.
@@ -517,7 +527,7 @@ mod tests {
 
         let ke = KeyEvent::Inception(event);
         assert_eq!(ke.ilk(), Ilk::Icp);
-        assert_eq!(ke.sn(), 0);
+        assert_eq!(ke.sn().unwrap(), 0);
         assert_eq!(ke.prefix(), "PREFIX");
         assert_eq!(ke.said(), "SAID");
     }

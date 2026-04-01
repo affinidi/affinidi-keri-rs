@@ -14,6 +14,8 @@
 //! - `"0G"` - SHA2-512
 
 use affinidi_cesr::Matter;
+use subtle::ConstantTimeEq;
+
 use crate::error::CryptoError;
 
 /// A cryptographic digest, wrapping a CESR `Matter` primitive.
@@ -77,7 +79,7 @@ impl Diger {
     /// Recomputes the digest using the same algorithm and compares.
     pub fn verify(&self, data: &[u8]) -> Result<bool, CryptoError> {
         let recomputed = Self::compute_digest(self.matter.code(), data)?;
-        Ok(recomputed == self.matter.raw())
+        Ok(recomputed.ct_eq(self.matter.raw()).into())
     }
 
     /// Compute a digest for the given code and data.
