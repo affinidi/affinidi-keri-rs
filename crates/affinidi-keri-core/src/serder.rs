@@ -218,6 +218,16 @@ impl Serder {
             .ok_or_else(|| CoreError::MissingField("s".into()))
     }
 
+    /// Take ownership of the parsed SAD, replacing it with `Value::Null`.
+    ///
+    /// This allows downstream consumers to call `serde_json::from_value(sad)`
+    /// without cloning. The `raw()`, `ilk()`, `prefix()`, `sn()`, and `said()`
+    /// methods that read from `raw` will still work, but `sad()` will return
+    /// `&Value::Null` after this call.
+    pub fn take_sad(&mut self) -> serde_json::Value {
+        std::mem::replace(&mut self.sad, serde_json::Value::Null)
+    }
+
     /// Verify the SAID of this message.
     ///
     /// # Errors

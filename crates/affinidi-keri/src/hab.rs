@@ -172,13 +172,7 @@ impl Hab {
 
         let prefix = computed_said.clone();
 
-        // Store the event, KEL entry, signatures, and state
-        store.put_event(&computed_said, serder.raw())?;
-        store.append_kel(&prefix, 0, &computed_said)?;
-        store.put_signatures(&computed_said, &sig_bytes)?;
-        store.put_first_seen(&prefix, 0, &computed_said)?;
-
-        // Store hab metadata
+        // Store event, KEL, first-seen, signatures, and hab metadata in one transaction
         let hab_data = serde_json::json!({
             "name": name,
             "prefix": prefix,
@@ -187,7 +181,15 @@ impl Hab {
         });
         let hab_bytes = serde_json::to_vec(&hab_data)
             .map_err(|e| KeriError::Config(e.to_string()))?;
-        store.put_hab(name, &hab_bytes)?;
+        store.store_event_with_hab(
+            &computed_said,
+            serder.raw(),
+            &prefix,
+            0,
+            Some(&sig_bytes),
+            name,
+            &hab_bytes,
+        )?;
 
         let hab = Hab {
             name: name.to_string(),
@@ -301,11 +303,8 @@ impl Hab {
         composed.extend_from_slice(counter_qb64.as_bytes());
         composed.extend_from_slice(&sig_bytes);
 
-        // Store
-        store.put_event(&computed_said, serder.raw())?;
-        store.append_kel(&self.prefix, new_sn, &computed_said)?;
-        store.put_signatures(&computed_said, &sig_bytes)?;
-        store.put_first_seen(&self.prefix, new_sn, &computed_said)?;
+        // Store event, KEL, first-seen, signatures in one transaction
+        store.store_event(&computed_said, serder.raw(), &self.prefix, new_sn, Some(&sig_bytes))?;
 
         // Update internal state
         self.signers = new_signers;
@@ -375,11 +374,8 @@ impl Hab {
         composed.extend_from_slice(counter_qb64.as_bytes());
         composed.extend_from_slice(&sig_bytes);
 
-        // Store
-        store.put_event(&computed_said, serder.raw())?;
-        store.append_kel(&self.prefix, new_sn, &computed_said)?;
-        store.put_signatures(&computed_said, &sig_bytes)?;
-        store.put_first_seen(&self.prefix, new_sn, &computed_said)?;
+        // Store event, KEL, first-seen, signatures in one transaction
+        store.store_event(&computed_said, serder.raw(), &self.prefix, new_sn, Some(&sig_bytes))?;
 
         // Update state
         self.last_said = computed_said;

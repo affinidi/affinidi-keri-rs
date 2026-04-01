@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/affinidi-cesr",
     "crates/affinidi-keri-crypto",
     "crates/affinidi-keri-core",
     "crates/affinidi-keri-db",
@@ -16,7 +15,7 @@ repository = "https://github.com/nicktho/affinidi-keri"
 
 [workspace.dependencies]
 # Internal crates
-affinidi-cesr = { path = "crates/affinidi-cesr" }
+affinidi-cesr = { path = "../affinidi-tdk-rs/crates/affinidi-tdk/common/affinidi-cesr" }
 affinidi-keri-crypto = { path = "crates/affinidi-keri-crypto" }
 affinidi-keri-core = { path = "crates/affinidi-keri-core" }
 affinidi-keri-db = { path = "crates/affinidi-keri-db" }
@@ -59,3 +58,4 @@ chrono = { version = "0.4", features = ["serde"] }
 # Testing
 hex = "0.4"
 tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }

@@ -4,11 +4,29 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use heed::types::*;
-use heed::{Database, Env, EnvOpenOptions};
+use heed::{Database, Env, EnvFlags, EnvOpenOptions};
 
 use crate::error::DbError;
 use crate::keys;
 use crate::store::KeriStore;
+
+/// Configuration for opening an LMDB store with optional performance flags.
+#[derive(Debug, Clone)]
+pub struct LmdbStoreConfig {
+    /// If true, skip fsync on each commit (faster but risks data loss on crash).
+    pub no_sync: bool,
+    /// If true, use a writable memory map with async flushes.
+    pub write_map: bool,
+}
+
+impl Default for LmdbStoreConfig {
+    fn default() -> Self {
+        Self {
+            no_sync: false,
+            write_map: false,
+        }
+    }
+}
 
 /// Maximum LMDB map size (1 GiB).
 const MAX_MAP_SIZE: usize = 1024 * 1024 * 1024;
@@ -92,6 +110,75 @@ impl LmdbStore {
             pses,
             habs,
         })
+    }
+
+    /// Open or create an LMDB store with custom configuration flags.
+    ///
+    /// Use `LmdbStoreConfig { no_sync: true, .. }` for benchmarks and bulk
+    /// loading where durability is not required.
+    pub fn open_with_config(path: &Path, config: &LmdbStoreConfig) -> Result<Self, DbError> {
+        fs::create_dir_all(path)
+            .map_err(|e| DbError::Database(format!("failed to create db dir: {e}")))?;
+
+        let mut opts = EnvOpenOptions::new();
+        opts.map_size(MAX_MAP_SIZE);
+        opts.max_dbs(MAX_DBS);
+
+        let mut flags = EnvFlags::empty();
+        if config.no_sync {
+            flags |= EnvFlags::NO_SYNC;
+        }
+        if config.write_map {
+            flags |= EnvFlags::WRITE_MAP | EnvFlags::MAP_ASYNC;
+        }
+
+        let env = unsafe {
+            if !flags.is_empty() {
+                opts.flags(flags);
+            }
+            opts.open(path)?
+        };
+
+        let mut wtxn = env.write_txn()?;
+
+        let evts = env.create_database(&mut wtxn, Some("evts"))?;
+        let kels = env.create_database(&mut wtxn, Some("kels"))?;
+        let fels = env.create_database(&mut wtxn, Some("fels"))?;
+        let dtss = env.create_database(&mut wtxn, Some("dtss"))?;
+        let sigs = env.create_database(&mut wtxn, Some("sigs"))?;
+        let wigs = env.create_database(&mut wtxn, Some("wigs"))?;
+        let rcts = env.create_database(&mut wtxn, Some("rcts"))?;
+        let states = env.create_database(&mut wtxn, Some("states"))?;
+        let ooes = env.create_database(&mut wtxn, Some("ooes"))?;
+        let pses = env.create_database(&mut wtxn, Some("pses"))?;
+        let habs = env.create_database(&mut wtxn, Some("habs"))?;
+
+        wtxn.commit()?;
+
+        Ok(Self {
+            path: path.to_path_buf(),
+            env,
+            evts,
+            kels,
+            fels,
+            dtss,
+            sigs,
+            wigs,
+            rcts,
+            states,
+            ooes,
+            pses,
+            habs,
+        })
+    }
+
+    /// Force an immediate sync of the LMDB environment to disk.
+    ///
+    /// Useful after bulk operations with `NO_SYNC` to ensure data is persisted.
+    pub fn sync(&self) -> Result<(), DbError> {
+        self.env
+            .force_sync()
+            .map_err(|e| DbError::Database(format!("sync failed: {e}")))
     }
 
     /// Open a temporary store for testing.
@@ -299,6 +386,49 @@ impl KeriStore for LmdbStore {
     fn latest_sn(&self, prefix: &str) -> Result<Option<u64>, DbError> {
         let kel = self.get_kel(prefix)?;
         Ok(kel.last().map(|(sn, _)| *sn))
+    }
+
+    fn store_event(
+        &self,
+        said: &str,
+        event: &[u8],
+        prefix: &str,
+        sn: u64,
+        sigs: Option<&[u8]>,
+    ) -> Result<(), DbError> {
+        let sn_key = keys::sn_key(prefix, sn);
+        let mut wtxn = self.env.write_txn()?;
+        self.evts.put(&mut wtxn, said, event)?;
+        self.kels.put(&mut wtxn, &sn_key, said)?;
+        self.fels.put(&mut wtxn, &sn_key, said)?;
+        if let Some(s) = sigs {
+            self.sigs.put(&mut wtxn, said, s)?;
+        }
+        wtxn.commit()?;
+        Ok(())
+    }
+
+    fn store_event_with_hab(
+        &self,
+        said: &str,
+        event: &[u8],
+        prefix: &str,
+        sn: u64,
+        sigs: Option<&[u8]>,
+        hab_name: &str,
+        hab_data: &[u8],
+    ) -> Result<(), DbError> {
+        let sn_key = keys::sn_key(prefix, sn);
+        let mut wtxn = self.env.write_txn()?;
+        self.evts.put(&mut wtxn, said, event)?;
+        self.kels.put(&mut wtxn, &sn_key, said)?;
+        self.fels.put(&mut wtxn, &sn_key, said)?;
+        if let Some(s) = sigs {
+            self.sigs.put(&mut wtxn, said, s)?;
+        }
+        self.habs.put(&mut wtxn, hab_name, hab_data)?;
+        wtxn.commit()?;
+        Ok(())
     }
 }
 

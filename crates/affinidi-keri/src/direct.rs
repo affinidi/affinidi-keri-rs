@@ -65,10 +65,12 @@ pub fn process_message(
     kevers: &mut HashMap<String, Kever>,
 ) -> Result<ProcessResult, KeriError> {
     let (parsed, _consumed) = parser::parse_next(data)?;
-    process_parsed(&parsed, store, kevers)
+    process_parsed(parsed, store, kevers)
 }
 
 /// Process a pre-parsed message in direct mode.
+///
+/// Takes `ParsedMessage` by value so it can consume the SAD without cloning.
 ///
 /// 1. Verifies controller signatures via `Kever`.
 /// 2. Verifies witness receipt couples when a backer threshold is set.
@@ -77,16 +79,14 @@ pub fn process_message(
 ///
 /// Returns a `ProcessResult` describing the processed event.
 pub fn process_parsed(
-    parsed: &ParsedMessage,
+    mut parsed: ParsedMessage,
     store: &dyn KeriStore,
     kevers: &mut HashMap<String, Kever>,
 ) -> Result<ProcessResult, KeriError> {
-    let serder = &parsed.serder;
-
-    let prefix = serder.prefix()?;
-    let sn = serder.sn()?;
-    let said = serder.said()?;
-    let ilk = serder.ilk()?;
+    let prefix = parsed.serder.prefix()?;
+    let sn = parsed.serder.sn()?;
+    let said = parsed.serder.said()?;
+    let ilk = parsed.serder.ilk()?;
 
     // Separate attachment types
     let controller_sigs = extract_controller_sigs(&parsed.attachments);
@@ -110,49 +110,55 @@ pub fn process_parsed(
 
     match ilk.as_str() {
         "icp" | "dip" => {
-            let verfers = verfers_from_serder(serder)?;
+            // Extract verfers before consuming the SAD
+            let verfers = verfers_from_serder(&parsed.serder)?;
 
-            // Create Kever — verifies controller signatures
-            let kever = Kever::new(serder, &controller_sigs, &verfers)?;
+            // Take ownership of the SAD to avoid cloning during deserialization
+            let sad = parsed.serder.take_sad();
+            let kever =
+                Kever::new_from_parts(parsed.serder.raw(), sad, &controller_sigs, &verfers)?;
 
             // Verify witness receipts if backer threshold > 0
             if kever.state().backer_threshold > 0 {
-                kever.verify_witness_receipts(serder.raw(), &receipt_couples)?;
+                kever.verify_witness_receipts(parsed.serder.raw(), &receipt_couples)?;
             }
 
-            // Store event, KEL, signatures
-            store.put_event(&said, serder.raw())?;
-            store.append_kel(&prefix, sn, &said)?;
-            store.put_first_seen(&prefix, sn, &said)?;
-            if !raw_sig_bytes.is_empty() {
-                store.put_signatures(&said, &raw_sig_bytes)?;
-            }
+            // Store event, KEL, first-seen, signatures in one transaction
+            let sigs =
+                if raw_sig_bytes.is_empty() { None } else { Some(raw_sig_bytes.as_slice()) };
+            store.store_event(&said, parsed.serder.raw(), &prefix, sn, sigs)?;
 
             kevers.insert(prefix.clone(), kever);
         }
         "rot" | "ixn" | "drt" => {
             if let Some(kever) = kevers.get_mut(&prefix) {
-                // Clone the kever so we can roll back if witness verification fails
-                let mut updated = kever.clone();
-                updated.update(serder, &controller_sigs)?;
+                // Take ownership of the SAD and verify without cloning
+                let sad = parsed.serder.take_sad();
+                let new_state = kever.verify_update_owned(
+                    parsed.serder.raw(),
+                    sad,
+                    &controller_sigs,
+                )?;
 
-                // Verify witness receipts against the updated state
-                if updated.state().backer_threshold > 0 {
-                    updated.verify_witness_receipts(serder.raw(), &receipt_couples)?;
+                // Verify witness receipts against the proposed state
+                if new_state.backer_threshold > 0 {
+                    Kever::verify_witness_receipts_static(
+                        parsed.serder.raw(),
+                        &receipt_couples,
+                        &new_state.backers,
+                        new_state.backer_threshold,
+                    )?;
                 }
 
                 // All checks passed — commit the update
-                *kever = updated;
-            }
-            // If no kever exists, in direct mode we skip verification
-            // (a full implementation would escrow)
+                kever.apply_verified_update(new_state);
 
-            store.put_event(&said, serder.raw())?;
-            store.append_kel(&prefix, sn, &said)?;
-            store.put_first_seen(&prefix, sn, &said)?;
-            if !raw_sig_bytes.is_empty() {
-                store.put_signatures(&said, &raw_sig_bytes)?;
+                let sigs =
+                    if raw_sig_bytes.is_empty() { None } else { Some(raw_sig_bytes.as_slice()) };
+                store.store_event(&said, parsed.serder.raw(), &prefix, sn, sigs)?;
             }
+            // If no kever exists, in direct mode we skip
+            // (a full implementation would escrow)
         }
         "rct" => {
             // Receipt message: store the receipt couples
@@ -169,7 +175,7 @@ pub fn process_parsed(
         }
         _ => {
             // Other message types — just store
-            store.put_event(&said, serder.raw())?;
+            store.put_event(&said, parsed.serder.raw())?;
         }
     }
 

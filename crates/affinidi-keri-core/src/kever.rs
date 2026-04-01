@@ -81,6 +81,57 @@ impl Kever {
         })
     }
 
+    /// Create a new Kever from pre-parsed parts, taking ownership of the SAD.
+    ///
+    /// Same validation as [`new`], but avoids cloning the JSON `Value` for
+    /// `serde_json::from_value`. Use when the caller has already consumed the
+    /// SAD from a `Serder` via [`Serder::take_sad`].
+    pub fn new_from_parts(
+        raw: &[u8],
+        sad: serde_json::Value,
+        sigs: &[Siger],
+        verfers: &[Verfer],
+    ) -> Result<Self, CoreError> {
+        let ilk = sad
+            .get("t")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CoreError::MissingField("t".into()))?;
+        if ilk != "icp" {
+            return Err(CoreError::UnexpectedIlk(format!(
+                "expected 'icp', got '{ilk}'"
+            )));
+        }
+
+        let icp: InceptionEvent =
+            serde_json::from_value(sad).map_err(CoreError::Json)?;
+
+        if icp.keys.len() != verfers.len() {
+            return Err(CoreError::Validation(format!(
+                "key count mismatch: event has {} keys, {} verfers provided",
+                icp.keys.len(),
+                verfers.len()
+            )));
+        }
+
+        for (i, (key_qb64, verfer)) in icp.keys.iter().zip(verfers.iter()).enumerate() {
+            let verfer_qb64 = verfer.qb64().map_err(CoreError::Crypto)?;
+            if *key_qb64 != verfer_qb64 {
+                return Err(CoreError::Validation(format!(
+                    "key[{i}] mismatch: event key '{key_qb64}' != verfer '{verfer_qb64}'"
+                )));
+            }
+        }
+
+        Self::verify_sigs_static(raw, sigs, verfers, &icp.keys_threshold.0)?;
+
+        let state = KeyState::from_inception(&icp)?;
+
+        Ok(Self {
+            state,
+            incepted: true,
+        })
+    }
+
     /// Process the next event in the KEL.
     ///
     /// Handles rotation and interaction events. Validates that:
@@ -138,6 +189,122 @@ impl Kever {
         }
 
         Ok(())
+    }
+
+    /// Verify the next event without mutating the Kever, returning the proposed
+    /// new `KeyState` on success.
+    ///
+    /// This avoids cloning the entire Kever for rollback support: the caller
+    /// can inspect the proposed state (e.g. to verify witness receipts) before
+    /// committing with [`apply_verified_update`].
+    pub fn verify_update(
+        &self,
+        serder: &Serder,
+        sigs: &[Siger],
+    ) -> Result<KeyState, CoreError> {
+        if !self.incepted {
+            return Err(CoreError::Validation(
+                "kever not initialized with inception event".into(),
+            ));
+        }
+
+        let ilk = serder.ilk()?;
+        let sn = serder.sn()?;
+
+        if sn != self.state.sn + 1 {
+            return Err(CoreError::OutOfOrder {
+                expected: self.state.sn + 1,
+                got: sn,
+            });
+        }
+
+        let verfers = self.build_verfers()?;
+        Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
+
+        let new_state = match ilk.as_str() {
+            "rot" => {
+                let rot: RotationEvent =
+                    serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+                self.state.apply_rotation(&rot)?
+            }
+            "ixn" => {
+                let ixn: InteractionEvent =
+                    serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+                self.state.apply_interaction(&ixn)?
+            }
+            _ => {
+                return Err(CoreError::UnexpectedIlk(format!(
+                    "expected 'rot' or 'ixn' for update, got '{ilk}'"
+                )));
+            }
+        };
+
+        Ok(new_state)
+    }
+
+    /// Like [`verify_update`], but takes an owned SAD to avoid cloning.
+    ///
+    /// Use when the caller has consumed the SAD from a `Serder` via
+    /// [`Serder::take_sad`].
+    pub fn verify_update_owned(
+        &self,
+        raw: &[u8],
+        sad: serde_json::Value,
+        sigs: &[Siger],
+    ) -> Result<KeyState, CoreError> {
+        if !self.incepted {
+            return Err(CoreError::Validation(
+                "kever not initialized with inception event".into(),
+            ));
+        }
+
+        let ilk = sad
+            .get("t")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| CoreError::MissingField("t".into()))?;
+
+        let sn_str = sad
+            .get("s")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CoreError::MissingField("s".into()))?;
+        let sn = u64::from_str_radix(sn_str, 16)
+            .map_err(|_| CoreError::Validation(format!("invalid sn: {sn_str}")))?;
+
+        if sn != self.state.sn + 1 {
+            return Err(CoreError::OutOfOrder {
+                expected: self.state.sn + 1,
+                got: sn,
+            });
+        }
+
+        let verfers = self.build_verfers()?;
+        Self::verify_sigs_static(raw, sigs, &verfers, &self.state.threshold)?;
+
+        let new_state = match ilk.as_str() {
+            "rot" => {
+                let rot: RotationEvent =
+                    serde_json::from_value(sad).map_err(CoreError::Json)?;
+                self.state.apply_rotation(&rot)?
+            }
+            "ixn" => {
+                let ixn: InteractionEvent =
+                    serde_json::from_value(sad).map_err(CoreError::Json)?;
+                self.state.apply_interaction(&ixn)?
+            }
+            _ => {
+                return Err(CoreError::UnexpectedIlk(format!(
+                    "expected 'rot' or 'ixn' for update, got '{ilk}'"
+                )));
+            }
+        };
+
+        Ok(new_state)
+    }
+
+    /// Apply a previously verified update (from [`verify_update`]).
+    pub fn apply_verified_update(&mut self, new_state: KeyState) {
+        self.state = new_state;
     }
 
     /// Verify signatures over a message using the current key set.

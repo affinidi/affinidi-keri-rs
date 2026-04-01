@@ -113,4 +113,43 @@ pub trait KeriStore: Send + Sync {
 
     /// Get the latest sequence number for a prefix.
     fn latest_sn(&self, prefix: &str) -> Result<Option<u64>, DbError>;
+
+    // --- Batch operations ---
+
+    /// Store an event with its KEL entry, first-seen record, and optional signatures
+    /// in a single logical operation. The default implementation calls individual
+    /// methods (one transaction each); backends may override for atomicity/performance.
+    fn store_event(
+        &self,
+        said: &str,
+        event: &[u8],
+        prefix: &str,
+        sn: u64,
+        sigs: Option<&[u8]>,
+    ) -> Result<(), DbError> {
+        self.put_event(said, event)?;
+        self.append_kel(prefix, sn, said)?;
+        self.put_first_seen(prefix, sn, said)?;
+        if let Some(s) = sigs {
+            self.put_signatures(said, s)?;
+        }
+        Ok(())
+    }
+
+    /// Store an event (as in [`store_event`](Self::store_event)) plus hab metadata
+    /// in a single logical operation.
+    fn store_event_with_hab(
+        &self,
+        said: &str,
+        event: &[u8],
+        prefix: &str,
+        sn: u64,
+        sigs: Option<&[u8]>,
+        hab_name: &str,
+        hab_data: &[u8],
+    ) -> Result<(), DbError> {
+        self.store_event(said, event, prefix, sn, sigs)?;
+        self.put_hab(hab_name, hab_data)?;
+        Ok(())
+    }
 }

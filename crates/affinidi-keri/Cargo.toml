@@ -18,3 +18,8 @@ tracing = { workspace = true }
 [dev-dependencies]
 hex = { workspace = true }
 tempfile = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "kel_benchmarks"
+harness = false

@@ -89,17 +89,16 @@ impl Judge {
     pub fn process(&mut self, data: &[u8]) -> Result<JudgeResult, KeriError> {
         // Parse once — reused for both inspection and processing.
         let (parsed, _consumed) = parser::parse_next(data)?;
-        let serder = &parsed.serder;
 
-        let prefix = serder.prefix()?;
-        let sn = serder.sn()?;
-        let said = serder.said()?;
-        let ilk = serder.ilk()?;
+        let prefix = parsed.serder.prefix()?;
+        let sn = parsed.serder.sn()?;
+        let said = parsed.serder.said()?;
+        let ilk = parsed.serder.ilk()?;
 
         // Receipts don't affect key state — just pass through.
         if ilk == "rct" {
             let result =
-                direct::process_parsed(&parsed, self.store.as_ref(), &mut self.kevers)?;
+                direct::process_parsed(parsed, self.store.as_ref(), &mut self.kevers)?;
             return Ok(JudgeResult::Accepted(result));
         }
 
@@ -111,7 +110,7 @@ impl Judge {
             None => {
                 // No prior event at this (prefix, sn) — accept normally.
                 let result =
-                    direct::process_parsed(&parsed, self.store.as_ref(), &mut self.kevers)?;
+                    direct::process_parsed(parsed, self.store.as_ref(), &mut self.kevers)?;
                 Ok(JudgeResult::Accepted(result))
             }
             Some(ref existing_said) if existing_said == &said => {
@@ -122,6 +121,8 @@ impl Judge {
                 // Different SAID at the same (prefix, sn) — potential duplicity.
                 // Verify the new event independently to confirm it's valid
                 // (not just a corrupt/forged message).
+                // verify_for_duplicity uses the old Kever::new / verify_sigs path
+                // (cold path — clone cost is irrelevant for duplicity detection).
                 self.verify_for_duplicity(&parsed, existing_said)
             }
         }
