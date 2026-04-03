@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-03
+
+### Security
+
+- **[CRITICAL]** Add prefix derivation validation in `Kever::new` and `Kever::new_from_parts`. Self-addressing prefixes must match the event SAID (`i == d`), and basic prefixes must match the first public key. Previously, an attacker could set `"i"` to a victim's prefix while `"d"` is the attacker's own SAID — SAID verification would pass but the prefix was unchecked.
+- **[HIGH]** Reject duplicate inceptions in direct mode. Replaying an inception event for an already-established prefix is now rejected, preventing KEL overwrites.
+- **[HIGH]** Judge refuses further events once a prefix is flagged as duplicitous. Previously, events continued to be processed, growing the DEL without verification purpose.
+- **[HIGH]** Add DEL size limits in Judge: 100 entries per prefix, 10,000 total. Prevents unbounded memory growth from sustained duplicity attacks.
+
 ### Added
 
 - Benchmarks for KEL processing (`kel_benchmarks`) and history replay (`bench_history` example).
@@ -13,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `Kever::verify_witness_receipts_static` for verifying receipts without a mutable kever reference.
 - `Serder::take_sad` for owned SAD consumption.
 - `KeriStore::store_event` to consolidate event, KEL, first-seen, and signature writes into a single transaction.
+- Regression tests for spoofed prefix attack, basic prefix mismatch, duplicate inception rejection, and post-duplicity event rejection.
 
 ### Fixed
 

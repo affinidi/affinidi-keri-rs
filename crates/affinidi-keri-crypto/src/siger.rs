@@ -8,9 +8,9 @@
 //! - `"2A"` - `"2F"` - Big-index variants (same algorithms)
 //! - `"3A"` / `"3B"` - Ed448
 
-use affinidi_cesr::Indexer;
 use crate::error::CryptoError;
 use crate::verfer::Verfer;
+use affinidi_cesr::Indexer;
 
 /// An indexed signature, wrapping a CESR `Indexer` primitive.
 ///
@@ -155,8 +155,7 @@ mod tests {
 
         let sig = signing_key.sign(message);
         let verfer = Verfer::new("D", pubkey).unwrap();
-        let siger =
-            Siger::new_with_verfer("A", 0, None, sig.to_bytes().to_vec(), verfer).unwrap();
+        let siger = Siger::new_with_verfer("A", 0, None, sig.to_bytes().to_vec(), verfer).unwrap();
 
         assert!(siger.verify(message).unwrap());
         assert!(!siger.verify(b"wrong").unwrap());

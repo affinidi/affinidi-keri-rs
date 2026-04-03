@@ -110,6 +110,13 @@ pub fn process_parsed(
 
     match ilk.as_str() {
         "icp" | "dip" => {
+            // Reject duplicate inceptions: a KEL can only have one inception per prefix
+            if kevers.contains_key(&prefix) {
+                return Err(KeriError::AlreadyExists(format!(
+                    "inception already exists for prefix '{prefix}'"
+                )));
+            }
+
             // Extract verfers before consuming the SAD
             let verfers = verfers_from_serder(&parsed.serder)?;
 
@@ -124,8 +131,11 @@ pub fn process_parsed(
             }
 
             // Store event, KEL, first-seen, signatures in one transaction
-            let sigs =
-                if raw_sig_bytes.is_empty() { None } else { Some(raw_sig_bytes.as_slice()) };
+            let sigs = if raw_sig_bytes.is_empty() {
+                None
+            } else {
+                Some(raw_sig_bytes.as_slice())
+            };
             store.store_event(&said, parsed.serder.raw(), &prefix, sn, sigs)?;
 
             kevers.insert(prefix.clone(), kever);
@@ -134,11 +144,8 @@ pub fn process_parsed(
             if let Some(kever) = kevers.get_mut(&prefix) {
                 // Take ownership of the SAD and verify without cloning
                 let sad = parsed.serder.take_sad();
-                let new_state = kever.verify_update_owned(
-                    parsed.serder.raw(),
-                    sad,
-                    &controller_sigs,
-                )?;
+                let new_state =
+                    kever.verify_update_owned(parsed.serder.raw(), sad, &controller_sigs)?;
 
                 // Verify witness receipts against the proposed state
                 if new_state.backer_threshold > 0 {
@@ -152,8 +159,11 @@ pub fn process_parsed(
 
                 // Persist to storage BEFORE updating in-memory state.
                 // If the DB write fails, the Kever remains at its prior state.
-                let sigs =
-                    if raw_sig_bytes.is_empty() { None } else { Some(raw_sig_bytes.as_slice()) };
+                let sigs = if raw_sig_bytes.is_empty() {
+                    None
+                } else {
+                    Some(raw_sig_bytes.as_slice())
+                };
                 store.store_event(&said, parsed.serder.raw(), &prefix, sn, sigs)?;
 
                 // Storage succeeded — now commit the in-memory update
@@ -227,9 +237,7 @@ mod tests {
     #[test]
     fn test_direct_mode_process_inception() {
         let creator_store = temp_store();
-        let config = InceptionConfig::builder()
-            .salt(vec![0x01u8; 16])
-            .build();
+        let config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
         let (hab, msg) = Hab::incept("alice", &config, &creator_store).unwrap();
 
         // Receiver processes the message
@@ -257,9 +265,7 @@ mod tests {
     #[test]
     fn test_direct_mode_process_rotation() {
         let creator_store = temp_store();
-        let config = InceptionConfig::builder()
-            .salt(vec![0x01u8; 16])
-            .build();
+        let config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
         let (mut hab, icp_msg) = Hab::incept("alice", &config, &creator_store).unwrap();
 
         let rot_config = RotationConfig::default();
@@ -284,9 +290,7 @@ mod tests {
     #[test]
     fn test_direct_mode_end_to_end_roundtrip() {
         let creator_store = temp_store();
-        let config = InceptionConfig::builder()
-            .salt(vec![0x42u8; 16])
-            .build();
+        let config = InceptionConfig::builder().salt(vec![0x42u8; 16]).build();
         let (mut hab, icp_msg) = Hab::incept("alice", &config, &creator_store).unwrap();
 
         // Rotate
@@ -383,8 +387,7 @@ mod tests {
         let (ctrl, ctrl_msg) = Hab::incept("ctrl", &ctrl_config, &ctrl_store).unwrap();
 
         // Parse the event to get the serder
-        let ctrl_serder =
-            affinidi_keri_core::serder::Serder::from_raw(&ctrl_msg[..]).unwrap();
+        let ctrl_serder = affinidi_keri_core::serder::Serder::from_raw(&ctrl_msg[..]).unwrap();
 
         // Witnesses receipt the inception
         let witness_attachment =
@@ -435,8 +438,7 @@ mod tests {
         let (_ctrl, ctrl_msg) = Hab::incept("ctrl", &ctrl_config, &ctrl_store).unwrap();
 
         // Only have 1 witness receipt
-        let ctrl_serder =
-            affinidi_keri_core::serder::Serder::from_raw(&ctrl_msg[..]).unwrap();
+        let ctrl_serder = affinidi_keri_core::serder::Serder::from_raw(&ctrl_msg[..]).unwrap();
         let witness_attachment =
             Hab::compose_witness_receipt_attachment(&ctrl_serder, &[&w1]).unwrap();
 
@@ -454,9 +456,7 @@ mod tests {
     fn test_direct_mode_rct_message_processing() {
         // Create controller
         let ctrl_store = temp_store();
-        let ctrl_config = InceptionConfig::builder()
-            .salt(vec![0x01u8; 16])
-            .build();
+        let ctrl_config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
         let (ctrl, ctrl_msg) = Hab::incept("ctrl", &ctrl_config, &ctrl_store).unwrap();
 
         // Process inception first
@@ -472,8 +472,7 @@ mod tests {
             .build();
         let (witness, _) = Hab::incept("witness", &w_config, &w_store).unwrap();
 
-        let ctrl_serder =
-            affinidi_keri_core::serder::Serder::from_raw(&ctrl_msg[..]).unwrap();
+        let ctrl_serder = affinidi_keri_core::serder::Serder::from_raw(&ctrl_msg[..]).unwrap();
         let rct_msg = witness.receipt_message(&ctrl_serder, &w_store).unwrap();
 
         // Process the receipt message
@@ -483,5 +482,27 @@ mod tests {
         // Controller kever should still be there and unchanged
         assert!(kevers.contains_key(ctrl.prefix()));
         assert_eq!(kevers[ctrl.prefix()].sn(), 0);
+    }
+
+    #[test]
+    fn test_direct_mode_duplicate_inception_rejected() {
+        let store_a = temp_store();
+        let config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
+        let (_hab, msg) = Hab::incept("alice", &config, &store_a).unwrap();
+
+        let receiver_store = temp_store();
+        let mut kevers = HashMap::new();
+
+        // First inception succeeds
+        process_message(&msg, &receiver_store, &mut kevers).unwrap();
+
+        // Replaying the same inception must be rejected
+        let result = process_message(&msg, &receiver_store, &mut kevers);
+        assert!(result.is_err(), "duplicate inception must be rejected");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("inception already exists"),
+            "unexpected error: {err}"
+        );
     }
 }

@@ -29,11 +29,7 @@ impl Habery {
     /// Create a new identifier via inception and register it.
     ///
     /// Returns the composed inception message bytes.
-    pub fn incept(
-        &mut self,
-        name: &str,
-        config: &InceptionConfig,
-    ) -> Result<Vec<u8>, KeriError> {
+    pub fn incept(&mut self, name: &str, config: &InceptionConfig) -> Result<Vec<u8>, KeriError> {
         if self.habs.contains_key(name) {
             return Err(KeriError::AlreadyExists(name.to_string()));
         }
@@ -56,11 +52,7 @@ impl Habery {
     /// Rotate the keys of the named identifier.
     ///
     /// Returns the composed rotation message bytes.
-    pub fn rotate(
-        &mut self,
-        name: &str,
-        config: &RotationConfig,
-    ) -> Result<Vec<u8>, KeriError> {
+    pub fn rotate(&mut self, name: &str, config: &RotationConfig) -> Result<Vec<u8>, KeriError> {
         let hab = self
             .habs
             .get_mut(name)

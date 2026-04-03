@@ -146,8 +146,7 @@ impl Hab {
         fix_version_string(&mut sad)?;
 
         // Compute SAID (fills d and i for self-addressing)
-        let computed_said =
-            said::compute_said(&mut sad, "d", "E", SerializationKind::Json)?;
+        let computed_said = said::compute_said(&mut sad, "d", "E", SerializationKind::Json)?;
 
         // Create Serder from the SAD
         let serder = Serder::new(SerializationKind::Json, sad)?;
@@ -179,8 +178,8 @@ impl Hab {
             "transferable": config.transferable,
             "code": config.code,
         });
-        let hab_bytes = serde_json::to_vec(&hab_data)
-            .map_err(|e| KeriError::Config(e.to_string()))?;
+        let hab_bytes =
+            serde_json::to_vec(&hab_data).map_err(|e| KeriError::Config(e.to_string()))?;
         store.store_event_with_hab(
             &computed_said,
             serder.raw(),
@@ -237,7 +236,9 @@ impl Hab {
         let mut new_next_signers = Vec::with_capacity(config.next_count);
         for i in 0..config.next_count {
             let path = format!("{next_gen}.{i}");
-            let signer = self.salter.signer(&self.code, &path, "low", self.transferable)?;
+            let signer = self
+                .salter
+                .signer(&self.code, &path, "low", self.transferable)?;
             new_next_signers.push(signer);
         }
 
@@ -279,8 +280,7 @@ impl Hab {
         fix_version_string(&mut sad)?;
 
         // Compute SAID
-        let computed_said =
-            said::compute_said(&mut sad, "d", "E", SerializationKind::Json)?;
+        let computed_said = said::compute_said(&mut sad, "d", "E", SerializationKind::Json)?;
 
         // Create Serder
         let serder = Serder::new(SerializationKind::Json, sad)?;
@@ -304,7 +304,13 @@ impl Hab {
         composed.extend_from_slice(&sig_bytes);
 
         // Store event, KEL, first-seen, signatures in one transaction
-        store.store_event(&computed_said, serder.raw(), &self.prefix, new_sn, Some(&sig_bytes))?;
+        store.store_event(
+            &computed_said,
+            serder.raw(),
+            &self.prefix,
+            new_sn,
+            Some(&sig_bytes),
+        )?;
 
         // Update internal state
         self.signers = new_signers;
@@ -350,8 +356,7 @@ impl Hab {
         fix_version_string(&mut sad)?;
 
         // Compute SAID
-        let computed_said =
-            said::compute_said(&mut sad, "d", "E", SerializationKind::Json)?;
+        let computed_said = said::compute_said(&mut sad, "d", "E", SerializationKind::Json)?;
 
         // Create Serder
         let serder = Serder::new(SerializationKind::Json, sad)?;
@@ -375,7 +380,13 @@ impl Hab {
         composed.extend_from_slice(&sig_bytes);
 
         // Store event, KEL, first-seen, signatures in one transaction
-        store.store_event(&computed_said, serder.raw(), &self.prefix, new_sn, Some(&sig_bytes))?;
+        store.store_event(
+            &computed_said,
+            serder.raw(),
+            &self.prefix,
+            new_sn,
+            Some(&sig_bytes),
+        )?;
 
         // Update state
         self.last_said = computed_said;
@@ -588,9 +599,7 @@ mod tests {
     #[test]
     fn test_hab_incept_with_salt() {
         let store = temp_store();
-        let config = InceptionConfig::builder()
-            .salt(vec![0x42u8; 16])
-            .build();
+        let config = InceptionConfig::builder().salt(vec![0x42u8; 16]).build();
         let (hab1, _) = Hab::incept("test1", &config, &store).unwrap();
 
         // Same salt should produce same prefix (deterministic)
@@ -618,9 +627,7 @@ mod tests {
     #[test]
     fn test_hab_rotate() {
         let store = temp_store();
-        let config = InceptionConfig::builder()
-            .salt(vec![0x01u8; 16])
-            .build();
+        let config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
         let (mut hab, _) = Hab::incept("alice", &config, &store).unwrap();
 
         let old_prefix = hab.prefix().to_string();
@@ -651,9 +658,7 @@ mod tests {
     #[test]
     fn test_hab_interact() {
         let store = temp_store();
-        let config = InceptionConfig::builder()
-            .salt(vec![0x01u8; 16])
-            .build();
+        let config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
         let (mut hab, _) = Hab::incept("alice", &config, &store).unwrap();
 
         let anchor = serde_json::json!({"d": "ETestDigest_____________________________"});
@@ -689,9 +694,7 @@ mod tests {
     #[test]
     fn test_hab_receipt() {
         let store = temp_store();
-        let config = InceptionConfig::builder()
-            .salt(vec![0x01u8; 16])
-            .build();
+        let config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
         let (hab, msg) = Hab::incept("alice", &config, &store).unwrap();
 
         // Parse the inception event to get a Serder
@@ -705,9 +708,7 @@ mod tests {
     #[test]
     fn test_hab_rotate_key_change() {
         let store = temp_store();
-        let config = InceptionConfig::builder()
-            .salt(vec![0x01u8; 16])
-            .build();
+        let config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
         let (mut hab, icp_msg) = Hab::incept("alice", &config, &store).unwrap();
 
         // Get the inception key
@@ -759,9 +760,7 @@ mod tests {
     #[test]
     fn test_hab_receipt_transferable_uses_b_counter() {
         let store = temp_store();
-        let config = InceptionConfig::builder()
-            .salt(vec![0x01u8; 16])
-            .build();
+        let config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
         let (hab, msg) = Hab::incept("alice", &config, &store).unwrap();
         let serder = Serder::from_raw(&msg[..]).unwrap();
 
@@ -808,9 +807,7 @@ mod tests {
 
         // Create a controller event to receipt
         let ctrl_store = temp_store();
-        let ctrl_config = InceptionConfig::builder()
-            .salt(vec![0x30u8; 16])
-            .build();
+        let ctrl_config = InceptionConfig::builder().salt(vec![0x30u8; 16]).build();
         let (_ctrl, ctrl_msg) = Hab::incept("ctrl", &ctrl_config, &ctrl_store).unwrap();
         let ctrl_serder = Serder::from_raw(&ctrl_msg[..]).unwrap();
 

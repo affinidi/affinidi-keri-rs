@@ -12,13 +12,13 @@
 use std::collections::HashMap;
 
 use affinidi_keri::direct;
-use affinidi_keri_core::kever::Kever;
 use affinidi_keri::{Hab, InceptionConfig};
+use affinidi_keri_core::kever::Kever;
 use affinidi_keri_core::said;
 use affinidi_keri_core::serder::Serder;
 use affinidi_keri_core::version::SerializationKind;
-use affinidi_keri_db::lmdb::LmdbStore;
 use affinidi_keri_db::KeriStore;
+use affinidi_keri_db::lmdb::LmdbStore;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("╔══════════════════════════════════════════════════════════════╗");
@@ -65,8 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Witnesses receipt the inception event
     let icp_serder = Serder::from_raw(&inception_msg)?;
-    let witness_att =
-        Hab::compose_witness_receipt_attachment(&icp_serder, &[&wit1, &wit2])?;
+    let witness_att = Hab::compose_witness_receipt_attachment(&icp_serder, &[&wit1, &wit2])?;
     let mut inception_witnessed = inception_msg.clone();
     inception_witnessed.extend_from_slice(&witness_att);
 
@@ -116,9 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let holder_dir = tempfile::tempdir()?;
     let holder_store = LmdbStore::open(holder_dir.path())?;
 
-    let holder_config = InceptionConfig::builder()
-        .salt(vec![7u8; 16])
-        .build();
+    let holder_config = InceptionConfig::builder().salt(vec![7u8; 16]).build();
 
     let (holder, _holder_icp_msg) = Hab::incept("holder", &holder_config, &holder_store)?;
     let holder_did = format!("did:keri:{}", holder.prefix());
@@ -160,8 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     credential["d"] = serde_json::Value::String(String::new());
 
     // Compute the credential's SAID
-    let credential_said =
-        said::compute_said(&mut credential, "d", "E", SerializationKind::Json)?;
+    let credential_said = said::compute_said(&mut credential, "d", "E", SerializationKind::Json)?;
 
     println!("── Step 4: ACDC Credential Issued ──");
     println!("  Credential SAID: {credential_said}");
@@ -186,8 +182,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Witnesses receipt the interaction event
     let ixn_serder = Serder::from_raw(&ixn_msg)?;
-    let ixn_witness_att =
-        Hab::compose_witness_receipt_attachment(&ixn_serder, &[&wit1, &wit2])?;
+    let ixn_witness_att = Hab::compose_witness_receipt_attachment(&ixn_serder, &[&wit1, &wit2])?;
     let mut ixn_witnessed = ixn_msg.clone();
     ixn_witnessed.extend_from_slice(&ixn_witness_att);
 
@@ -237,12 +232,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (_sn, event_said) in &kel {
         if let Some(event_data) = issuer_store.get_event(event_said)? {
             let serder = Serder::from_raw(&event_data)?;
-            if serder.ilk()? == "ixn" {
-                if let Some(anchors) = serder.sad().get("a").and_then(|v| v.as_array()) {
-                    for anchor in anchors {
-                        if anchor.get("i").and_then(|v| v.as_str()) == Some(&credential_said) {
-                            anchor_found = true;
-                        }
+            if serder.ilk()? == "ixn"
+                && let Some(anchors) = serder.sad().get("a").and_then(|v| v.as_array())
+            {
+                for anchor in anchors {
+                    if anchor.get("i").and_then(|v| v.as_str()) == Some(&credential_said) {
+                        anchor_found = true;
                     }
                 }
             }
@@ -288,10 +283,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(event_data) = issuer_store.get_event(event_said)? {
             let serder = Serder::from_raw(&event_data)?;
             let ilk = serder.ilk()?;
-            println!(
-                "  SN={sn}  ilk={ilk}  said={}...",
-                &event_said[..24]
-            );
+            println!("  SN={sn}  ilk={ilk}  said={}...", &event_said[..24]);
             let json: serde_json::Value = serde_json::from_slice(serder.raw())?;
             println!("{}", serde_json::to_string_pretty(&json)?);
             println!();

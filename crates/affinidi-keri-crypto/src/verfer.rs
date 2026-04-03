@@ -8,8 +8,8 @@
 //! - `"1AAI"` - ECDSA secp256r1 non-transferable (33-byte compressed public key)
 //! - `"1AAJ"` - ECDSA secp256r1 transferable (33-byte compressed public key)
 
-use affinidi_cesr::Matter;
 use crate::error::CryptoError;
+use affinidi_cesr::Matter;
 
 /// A public verification key, wrapping a CESR `Matter` primitive.
 ///
@@ -81,15 +81,17 @@ impl Verfer {
 
     /// Verify an Ed25519 signature.
     fn verify_ed25519(&self, message: &[u8], signature: &[u8]) -> Result<bool, CryptoError> {
-        use ed25519_dalek::{Signature, VerifyingKey};
         use ed25519_dalek::Verifier;
+        use ed25519_dalek::{Signature, VerifyingKey};
 
-        let key_bytes: [u8; 32] = self.matter.raw().try_into().map_err(|_| {
-            CryptoError::InvalidKeySize {
-                expected: 32,
-                got: self.matter.raw().len(),
-            }
-        })?;
+        let key_bytes: [u8; 32] =
+            self.matter
+                .raw()
+                .try_into()
+                .map_err(|_| CryptoError::InvalidKeySize {
+                    expected: 32,
+                    got: self.matter.raw().len(),
+                })?;
 
         let verifying_key = VerifyingKey::from_bytes(&key_bytes)
             .map_err(|_| CryptoError::InvalidKey("invalid Ed25519 public key".into()))?;
@@ -107,7 +109,7 @@ impl Verfer {
 
     /// Verify an ECDSA secp256k1 signature.
     fn verify_secp256k1(&self, message: &[u8], signature: &[u8]) -> Result<bool, CryptoError> {
-        use k256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
+        use k256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
 
         let verifying_key = VerifyingKey::from_sec1_bytes(self.matter.raw())
             .map_err(|_| CryptoError::InvalidKey("invalid secp256k1 public key".into()))?;
@@ -123,7 +125,7 @@ impl Verfer {
 
     /// Verify an ECDSA secp256r1 signature.
     fn verify_secp256r1(&self, message: &[u8], signature: &[u8]) -> Result<bool, CryptoError> {
-        use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
+        use p256::ecdsa::{Signature, VerifyingKey, signature::Verifier};
 
         let verifying_key = VerifyingKey::from_sec1_bytes(self.matter.raw())
             .map_err(|_| CryptoError::InvalidKey("invalid secp256r1 public key".into()))?;
@@ -156,10 +158,9 @@ mod tests {
     fn test_verfer_new_ed25519() {
         // Generate a valid Ed25519 public key from a known seed
         let seed: [u8; 32] = [
-            0x9f, 0x7b, 0xa8, 0x12, 0x34, 0x56, 0x78, 0x9a,
-            0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44, 0x55,
-            0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
-            0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+            0x9f, 0x7b, 0xa8, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33,
+            0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11,
+            0x22, 0x33, 0x44, 0x55,
         ];
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
         let pubkey = signing_key.verifying_key().to_bytes().to_vec();

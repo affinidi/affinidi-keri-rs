@@ -122,9 +122,7 @@ impl Threshold {
                 let mut weighted = Vec::new();
                 for clause in clauses {
                     let arr = clause.as_array().ok_or_else(|| {
-                        CoreError::Validation(
-                            "weighted threshold clause must be an array".into(),
-                        )
+                        CoreError::Validation("weighted threshold clause must be an array".into())
                     })?;
                     if arr.is_empty() {
                         return Err(CoreError::Validation(
@@ -254,8 +252,7 @@ impl Serialize for ThresholdValue {
 impl<'de> Deserialize<'de> for ThresholdValue {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
-        let threshold =
-            Threshold::from_json_value(&value).map_err(serde::de::Error::custom)?;
+        let threshold = Threshold::from_json_value(&value).map_err(serde::de::Error::custom)?;
         Ok(ThresholdValue(threshold))
     }
 }

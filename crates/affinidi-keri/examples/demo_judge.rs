@@ -41,9 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let hab1_dir = tempfile::tempdir()?;
     let hab1_store = LmdbStore::open(hab1_dir.path())?;
-    let config = InceptionConfig::builder()
-        .salt(salt.to_vec())
-        .build();
+    let config = InceptionConfig::builder().salt(salt.to_vec()).build();
     let (mut hab1, icp_msg) = Hab::incept("device-1", &config, &hab1_store)?;
 
     let hab2_dir = tempfile::tempdir()?;
@@ -67,9 +65,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ixn_a_serder = Serder::from_raw(&ixn_a)?;
     let ixn_b_serder = Serder::from_raw(&ixn_b)?;
 
-    println!("  Device 1 → ixn at sn=1  SAID: {}...", &ixn_a_serder.said()?[..20]);
+    println!(
+        "  Device 1 → ixn at sn=1  SAID: {}...",
+        &ixn_a_serder.said()?[..20]
+    );
     println!("    anchor: EAnchorA_document_hash_AAAAAAAAAAAAA");
-    println!("  Device 2 → ixn at sn=1  SAID: {}...", &ixn_b_serder.said()?[..20]);
+    println!(
+        "  Device 2 → ixn at sn=1  SAID: {}...",
+        &ixn_b_serder.said()?[..20]
+    );
     println!("    anchor: EAnchorB_document_hash_BBBBBBBBBBBBB");
     println!();
     println!("  Same prefix, same sn, different content = DUPLICITY");
@@ -93,8 +97,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let r1_ixn = direct::process_message(&ixn_a, &v1_store, &mut v1_kevers)?;
 
     println!("  Verifier 1:");
-    println!("    Processed icp (sn=0): ACCEPTED  said={}...", &r1_icp.said[..20]);
-    println!("    Processed ixn (sn=1): ACCEPTED  said={}...", &r1_ixn.said[..20]);
+    println!(
+        "    Processed icp (sn=0): ACCEPTED  said={}...",
+        &r1_icp.said[..20]
+    );
+    println!(
+        "    Processed ixn (sn=1): ACCEPTED  said={}...",
+        &r1_ixn.said[..20]
+    );
     println!("    Status: happy, no errors detected");
     println!();
 
@@ -107,8 +117,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let r2_ixn = direct::process_message(&ixn_b, &v2_store, &mut v2_kevers)?;
 
     println!("  Verifier 2:");
-    println!("    Processed icp (sn=0): ACCEPTED  said={}...", &r2_icp.said[..20]);
-    println!("    Processed ixn (sn=1): ACCEPTED  said={}...", &r2_ixn.said[..20]);
+    println!(
+        "    Processed icp (sn=0): ACCEPTED  said={}...",
+        &r2_icp.said[..20]
+    );
+    println!(
+        "    Processed ixn (sn=1): ACCEPTED  said={}...",
+        &r2_ixn.said[..20]
+    );
     println!("    Status: happy, no errors detected");
     println!();
 
@@ -198,7 +214,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let evidence_list = judge.evidence_for(&prefix);
     for (i, ev) in evidence_list.iter().enumerate() {
         println!("    DEL[{i}]:");
-        println!("      sn={}, first_said={}..., dup_said={}...",
+        println!(
+            "      sn={}, first_said={}..., dup_said={}...",
             ev.sn,
             &ev.first_seen_said[..20],
             &ev.duplicitous_said[..20],

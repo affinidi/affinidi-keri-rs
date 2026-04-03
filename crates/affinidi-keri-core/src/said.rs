@@ -43,9 +43,8 @@ pub fn compute_said(
         .ok_or_else(|| CoreError::Validation("SAD must be a JSON object".into()))?;
 
     // Look up the full size (fs) for this digest code to know the dummy length
-    let sizage = matter_sizage(code).ok_or_else(|| {
-        CoreError::Validation(format!("unknown digest code: {code}"))
-    })?;
+    let sizage = matter_sizage(code)
+        .ok_or_else(|| CoreError::Validation(format!("unknown digest code: {code}")))?;
     let dummy_len = sizage.fs;
     if dummy_len == 0 {
         return Err(CoreError::Validation(format!(
@@ -132,23 +131,16 @@ pub fn verify_said(
 }
 
 /// Serialize a SAD value according to the specified serialization kind.
-fn serialize_sad(
-    sad: &serde_json::Value,
-    kind: SerializationKind,
-) -> Result<Vec<u8>, CoreError> {
+fn serialize_sad(sad: &serde_json::Value, kind: SerializationKind) -> Result<Vec<u8>, CoreError> {
     match kind {
-        SerializationKind::Json => {
-            serde_json::to_vec(sad).map_err(CoreError::Json)
-        }
+        SerializationKind::Json => serde_json::to_vec(sad).map_err(CoreError::Json),
         SerializationKind::Cbor => {
             let mut buf = Vec::new();
-            ciborium::into_writer(sad, &mut buf)
-                .map_err(|e| CoreError::Cbor(e.to_string()))?;
+            ciborium::into_writer(sad, &mut buf).map_err(|e| CoreError::Cbor(e.to_string()))?;
             Ok(buf)
         }
         SerializationKind::MsgPack => {
-            rmp_serde::to_vec(sad)
-                .map_err(|e| CoreError::MsgPack(e.to_string()))
+            rmp_serde::to_vec(sad).map_err(|e| CoreError::MsgPack(e.to_string()))
         }
     }
 }

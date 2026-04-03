@@ -265,8 +265,8 @@ fn parse_backer_threshold(bt_str: &str) -> Result<usize, CoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use affinidi_keri_crypto::Signer;
     use crate::threshold::ThresholdValue;
+    use affinidi_keri_crypto::Signer;
 
     /// Create a key qb64 and its next-key digest qb64 from a seed.
     fn make_key_pair(seed: [u8; 32]) -> (String, String) {
@@ -386,7 +386,8 @@ mod tests {
 
         let err = state.apply_rotation(&rot).unwrap_err();
         assert!(
-            err.to_string().contains("does not match next-key commitment"),
+            err.to_string()
+                .contains("does not match next-key commitment"),
             "expected commitment mismatch error, got: {err}"
         );
     }
@@ -422,7 +423,8 @@ mod tests {
 
         let err = state.apply_rotation(&rot).unwrap_err();
         assert!(
-            err.to_string().contains("does not match next-key commitment count"),
+            err.to_string()
+                .contains("does not match next-key commitment count"),
             "expected count mismatch error, got: {err}"
         );
     }

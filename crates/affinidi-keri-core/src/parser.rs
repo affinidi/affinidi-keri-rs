@@ -106,7 +106,13 @@ fn parse_next_sad(stream: &[u8]) -> Result<(ParsedMessage, usize), CoreError> {
     let (attachments, att_consumed) = parse_attachments(rest)?;
 
     let total_consumed = msg_size + att_consumed;
-    Ok((ParsedMessage { serder, attachments }, total_consumed))
+    Ok((
+        ParsedMessage {
+            serder,
+            attachments,
+        },
+        total_consumed,
+    ))
 }
 
 /// Parse CESR attachment groups from the stream following a message body.
@@ -124,13 +130,11 @@ fn parse_attachments(data: &[u8]) -> Result<(Vec<Attachment>, usize), CoreError>
         }
 
         // Try to parse a counter from the text
-        let rest = std::str::from_utf8(&data[offset..]).map_err(|_| {
-            CoreError::ParseError("attachment data is not valid UTF-8".into())
-        })?;
+        let rest = std::str::from_utf8(&data[offset..])
+            .map_err(|_| CoreError::ParseError("attachment data is not valid UTF-8".into()))?;
 
-        let counter = Counter::from_qb64(rest).map_err(|e| {
-            CoreError::ParseError(format!("failed to parse counter: {e}"))
-        })?;
+        let counter = Counter::from_qb64(rest)
+            .map_err(|e| CoreError::ParseError(format!("failed to parse counter: {e}")))?;
 
         let counter_size = counter.full_size();
         offset += counter_size;
@@ -199,9 +203,10 @@ fn parse_indexed_sigs(data: &[u8], count: usize) -> Result<(Vec<Siger>, usize), 
         }
 
         // Determine the full size of this indexed signature
-        let first_char = text[offset..].chars().next().ok_or_else(|| {
-            CoreError::ParseError(format!("empty data for indexed sig {i}"))
-        })?;
+        let first_char = text[offset..]
+            .chars()
+            .next()
+            .ok_or_else(|| CoreError::ParseError(format!("empty data for indexed sig {i}")))?;
         let hs = hardage(first_char).ok_or_else(|| {
             CoreError::ParseError(format!(
                 "unknown hardage for char '{first_char}' in indexed sig"
@@ -212,9 +217,8 @@ fn parse_indexed_sigs(data: &[u8], count: usize) -> Result<(Vec<Siger>, usize), 
             return Err(CoreError::ParseError("truncated indexer code".into()));
         }
         let code = &text[offset..offset + hs];
-        let sizage = indexer_sizage(code).ok_or_else(|| {
-            CoreError::ParseError(format!("unknown indexer code: {code}"))
-        })?;
+        let sizage = indexer_sizage(code)
+            .ok_or_else(|| CoreError::ParseError(format!("unknown indexer code: {code}")))?;
 
         if offset + sizage.fs > text.len() {
             return Err(CoreError::ParseError(format!(
@@ -225,9 +229,8 @@ fn parse_indexed_sigs(data: &[u8], count: usize) -> Result<(Vec<Siger>, usize), 
         }
 
         let qb64 = &text[offset..offset + sizage.fs];
-        let indexer = Indexer::from_qb64(qb64).map_err(|e| {
-            CoreError::ParseError(format!("failed to parse indexer: {e}"))
-        })?;
+        let indexer = Indexer::from_qb64(qb64)
+            .map_err(|e| CoreError::ParseError(format!("failed to parse indexer: {e}")))?;
 
         let siger = Siger::new(
             indexer.code(),
@@ -280,9 +283,8 @@ fn parse_receipt_couples(
         offset += sig_size;
 
         // Decode the signature raw bytes from the Matter
-        let sig_matter = affinidi_cesr::Matter::from_qb64(&sig_qb64).map_err(|e| {
-            CoreError::ParseError(format!("failed to parse sig matter: {e}"))
-        })?;
+        let sig_matter = affinidi_cesr::Matter::from_qb64(&sig_qb64)
+            .map_err(|e| CoreError::ParseError(format!("failed to parse sig matter: {e}")))?;
 
         couples.push((prefix_qb64, sig_matter.raw().to_vec()));
     }
@@ -292,11 +294,7 @@ fn parse_receipt_couples(
 
 /// Parse a single Matter primitive qb64 string from text data.
 /// Returns the qb64 string and the number of characters consumed.
-fn parse_matter_qb64(
-    text: &str,
-    index: usize,
-    name: &str,
-) -> Result<(String, usize), CoreError> {
+fn parse_matter_qb64(text: &str, index: usize, name: &str) -> Result<(String, usize), CoreError> {
     use affinidi_cesr::tables::matter_sizage;
 
     if text.is_empty() {
@@ -305,14 +303,13 @@ fn parse_matter_qb64(
         )));
     }
 
-    let first_char = text.chars().next().ok_or_else(|| {
-        CoreError::ParseError(format!("empty data for {name} at couple {index}"))
-    })?;
+    let first_char = text
+        .chars()
+        .next()
+        .ok_or_else(|| CoreError::ParseError(format!("empty data for {name} at couple {index}")))?;
 
     let hs = hardage(first_char).ok_or_else(|| {
-        CoreError::ParseError(format!(
-            "unknown hardage for char '{first_char}' in {name}"
-        ))
+        CoreError::ParseError(format!("unknown hardage for char '{first_char}' in {name}"))
     })?;
 
     if text.len() < hs {
@@ -322,9 +319,8 @@ fn parse_matter_qb64(
     }
 
     let code = &text[..hs];
-    let sizage = matter_sizage(code).ok_or_else(|| {
-        CoreError::ParseError(format!("unknown matter code: {code} for {name}"))
-    })?;
+    let sizage = matter_sizage(code)
+        .ok_or_else(|| CoreError::ParseError(format!("unknown matter code: {code} for {name}")))?;
 
     let fs = if sizage.fs > 0 {
         sizage.fs
@@ -532,8 +528,8 @@ mod tests {
         let serder = Serder::new(SerializationKind::Json, sad).unwrap();
         let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
 
-        let msg1 = composer::compose_event(&serder, &[sig.clone()]).unwrap();
-        let msg2 = composer::compose_event(&serder, &[sig]).unwrap();
+        let msg1 = composer::compose_event(&serder, std::slice::from_ref(&sig)).unwrap();
+        let msg2 = composer::compose_event(&serder, std::slice::from_ref(&sig)).unwrap();
 
         let mut combined = msg1;
         combined.extend_from_slice(&msg2);

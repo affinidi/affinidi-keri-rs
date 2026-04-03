@@ -5,9 +5,9 @@
 //! - `"0C"` - ECDSA secp256k1 signature (64 bytes)
 //! - `"0I"` - ECDSA secp256r1 signature (64 bytes)
 
-use affinidi_cesr::Matter;
 use crate::error::CryptoError;
 use crate::verfer::Verfer;
+use affinidi_cesr::Matter;
 
 /// A non-indexed signature, wrapping a CESR `Matter` primitive.
 ///
