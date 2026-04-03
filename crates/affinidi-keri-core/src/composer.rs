@@ -50,11 +50,7 @@ pub fn compose_event(serder: &Serder, sigs: &[Siger]) -> Result<Vec<u8>, CoreErr
 ///
 /// # Errors
 /// Returns `CoreError` if the counter or primitives cannot be encoded.
-pub fn compose_receipt(
-    serder: &Serder,
-    prefix: &str,
-    cigar: &Cigar,
-) -> Result<Vec<u8>, CoreError> {
+pub fn compose_receipt(serder: &Serder, prefix: &str, cigar: &Cigar) -> Result<Vec<u8>, CoreError> {
     let mut output = Vec::with_capacity(serder.size() + 4 + prefix.len() + 88);
 
     // Message body

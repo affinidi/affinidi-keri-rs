@@ -144,12 +144,15 @@ impl Signer {
     fn sign_ed25519(&self, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
         use ed25519_dalek::Signer;
 
-        let seed: [u8; 32] = self.raw.0.as_slice().try_into().map_err(|_| {
-            CryptoError::InvalidKeySize {
-                expected: 32,
-                got: self.raw.0.len(),
-            }
-        })?;
+        let seed: [u8; 32] =
+            self.raw
+                .0
+                .as_slice()
+                .try_into()
+                .map_err(|_| CryptoError::InvalidKeySize {
+                    expected: 32,
+                    got: self.raw.0.len(),
+                })?;
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
         let sig = signing_key.sign(message);
         Ok(sig.to_bytes().to_vec())
@@ -157,7 +160,7 @@ impl Signer {
 
     /// secp256k1 signing.
     fn sign_secp256k1(&self, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        use k256::ecdsa::{signature::Signer, SigningKey};
+        use k256::ecdsa::{SigningKey, signature::Signer};
 
         let signing_key = SigningKey::from_slice(&self.raw.0)
             .map_err(|_| CryptoError::InvalidKey("invalid signing key".into()))?;
@@ -167,7 +170,7 @@ impl Signer {
 
     /// secp256r1 signing.
     fn sign_secp256r1(&self, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        use p256::ecdsa::{signature::Signer, SigningKey};
+        use p256::ecdsa::{SigningKey, signature::Signer};
 
         let signing_key = SigningKey::from_slice(&self.raw.0)
             .map_err(|_| CryptoError::InvalidKey("invalid signing key".into()))?;

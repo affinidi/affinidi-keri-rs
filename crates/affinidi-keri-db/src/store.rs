@@ -136,6 +136,7 @@ pub trait KeriStore: Send + Sync {
     /// in a single atomic operation.
     ///
     /// See [`store_event`](Self::store_event) for atomicity requirements.
+    #[allow(clippy::too_many_arguments)]
     fn store_event_with_hab(
         &self,
         said: &str,

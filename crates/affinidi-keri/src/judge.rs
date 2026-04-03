@@ -54,11 +54,28 @@ pub enum JudgeResult {
     DuplicityDetected(DuplicityEvidence),
 }
 
+/// Maximum number of duplicity evidence entries per prefix.
+///
+/// Once this many entries exist for a given prefix, further evidence for
+/// that prefix is dropped. This bounds memory even if many distinct
+/// conflicting events are generated before the early-exit check fires.
+const MAX_DEL_PER_PREFIX: usize = 100;
+
+/// Maximum total duplicity evidence entries across all prefixes.
+///
+/// Provides a hard upper bound on memory regardless of how many distinct
+/// prefixes produce duplicity.
+const MAX_DEL_TOTAL: usize = 10_000;
+
 /// A KERI Judge that enforces the first-seen policy and detects duplicity.
 ///
 /// The `duplicitous` set and `del` vector are maintained together: any prefix
 /// in `duplicitous` has at least one entry in `del`, and vice versa. All
 /// mutations go through [`record_duplicity`](Self::record_duplicity).
+///
+/// Once a prefix is flagged as duplicitous, the Judge refuses to process
+/// further events for it — the identifier is considered "dead" per the KERI
+/// spec's duplicity handling rules.
 ///
 /// # Security
 /// TODO: Duplicity evidence (`del`, `duplicitous`) is held only in memory.
@@ -102,9 +119,17 @@ impl Judge {
 
         // Receipts don't affect key state — just pass through.
         if ilk == "rct" {
-            let result =
-                direct::process_parsed(parsed, self.store.as_ref(), &mut self.kevers)?;
+            let result = direct::process_parsed(parsed, self.store.as_ref(), &mut self.kevers)?;
             return Ok(JudgeResult::Accepted(result));
+        }
+
+        // Once a prefix is flagged as duplicitous, refuse all further events.
+        // The identifier is considered "dead" — accepting more events would
+        // only grow the DEL and serve no verification purpose.
+        if self.duplicitous.contains(&prefix) {
+            return Err(KeriError::Core(affinidi_keri_core::CoreError::Validation(
+                format!("prefix '{prefix}' is duplicitous — refusing further events"),
+            )));
         }
 
         // Check the first-seen log BEFORE calling process_parsed,
@@ -114,8 +139,7 @@ impl Judge {
         match first_seen {
             None => {
                 // No prior event at this (prefix, sn) — accept normally.
-                let result =
-                    direct::process_parsed(parsed, self.store.as_ref(), &mut self.kevers)?;
+                let result = direct::process_parsed(parsed, self.store.as_ref(), &mut self.kevers)?;
                 Ok(JudgeResult::Accepted(result))
             }
             Some(ref existing_said) if existing_said == &said => {
@@ -162,9 +186,7 @@ impl Judge {
                 if let Some(kever) = self.kevers.get(&prefix) {
                     kever.verify_sigs(serder.raw(), &controller_sigs)?;
                 } else {
-                    return Err(KeriError::NotFound(format!(
-                        "no kever for prefix {prefix}"
-                    )));
+                    return Err(KeriError::NotFound(format!("no kever for prefix {prefix}")));
                 }
             }
             _ => {
@@ -175,14 +197,11 @@ impl Judge {
         }
 
         // The new event is cryptographically valid — this is genuine duplicity.
-        let first_seen_event = self
-            .store
-            .get_event(existing_said)?
-            .ok_or_else(|| {
-                KeriError::NotFound(format!(
-                    "first-seen event {existing_said} missing from store"
-                ))
-            })?;
+        let first_seen_event = self.store.get_event(existing_said)?.ok_or_else(|| {
+            KeriError::NotFound(format!(
+                "first-seen event {existing_said} missing from store"
+            ))
+        })?;
 
         let evidence = DuplicityEvidence {
             prefix: prefix.clone(),
@@ -193,15 +212,36 @@ impl Judge {
             duplicitous_event: serder.raw().to_vec(),
         };
 
-        Ok(JudgeResult::DuplicityDetected(self.record_duplicity(evidence)))
+        Ok(JudgeResult::DuplicityDetected(
+            self.record_duplicity(evidence),
+        ))
     }
 
     /// Record duplicity evidence and flag the prefix.
     ///
     /// Maintains the invariant that `self.duplicitous` contains exactly the
     /// set of prefixes that appear in `self.del`.
+    ///
+    /// Evidence is only recorded if both the per-prefix and global caps have
+    /// not been reached. The prefix is always flagged as duplicitous regardless.
     fn record_duplicity(&mut self, evidence: DuplicityEvidence) -> DuplicityEvidence {
         self.duplicitous.insert(evidence.prefix.clone());
+
+        // Enforce global cap
+        if self.del.len() >= MAX_DEL_TOTAL {
+            return evidence;
+        }
+
+        // Enforce per-prefix cap
+        let prefix_count = self
+            .del
+            .iter()
+            .filter(|e| e.prefix == evidence.prefix)
+            .count();
+        if prefix_count >= MAX_DEL_PER_PREFIX {
+            return evidence;
+        }
+
         self.del.push(evidence.clone());
         evidence
     }
@@ -252,14 +292,9 @@ mod tests {
 
     /// Helper: create a Hab with the given salt in its own store, returning
     /// the Hab, inception message, and the store (kept alive).
-    fn make_hab(
-        name: &str,
-        salt: [u8; 16],
-    ) -> (Hab, Vec<u8>, Box<LmdbStore>) {
+    fn make_hab(name: &str, salt: [u8; 16]) -> (Hab, Vec<u8>, Box<LmdbStore>) {
         let store = temp_store();
-        let config = InceptionConfig::builder()
-            .salt(salt.to_vec())
-            .build();
+        let config = InceptionConfig::builder().salt(salt.to_vec()).build();
         let (hab, msg) = Hab::incept(name, &config, store.as_ref()).unwrap();
         (hab, msg, store)
     }
@@ -415,6 +450,54 @@ mod tests {
         assert_eq!(judge.del().len(), 1);
 
         // An unrelated prefix has no evidence
-        assert!(judge.evidence_for("ENonExistent________________________________").is_empty());
+        assert!(
+            judge
+                .evidence_for("ENonExistent________________________________")
+                .is_empty()
+        );
+    }
+
+    /// Regression test: once a prefix is flagged as duplicitous, further events
+    /// from that prefix are rejected and the DEL does not grow.
+    #[test]
+    fn test_judge_rejects_events_after_duplicity() {
+        let (mut hab1, icp_msg, hab1_store) = make_hab("hab1", [0xDE; 16]);
+        let (mut hab2, _, hab2_store) = make_hab("hab2", [0xDE; 16]);
+
+        let judge_store = temp_store();
+        let mut judge = Judge::new(judge_store);
+
+        judge.process(&icp_msg).unwrap();
+
+        // Trigger duplicity at sn=1
+        let ixn_a = hab1
+            .interact(
+                &[serde_json::json!({"d": "EAnchorA_document_hash_AAAAAAAAAAAAA"})],
+                hab1_store.as_ref(),
+            )
+            .unwrap();
+        let ixn_b = hab2
+            .interact(
+                &[serde_json::json!({"d": "EAnchorB_document_hash_BBBBBBBBBBBBB"})],
+                hab2_store.as_ref(),
+            )
+            .unwrap();
+
+        judge.process(&ixn_a).unwrap();
+        judge.process(&ixn_b).unwrap();
+        assert_eq!(judge.del().len(), 1);
+
+        // Further events from either fork must be rejected
+        let ixn_c = hab1
+            .interact(
+                &[serde_json::json!({"d": "EAnchorC_document_hash_CCCCCCCCCCCCC"})],
+                hab1_store.as_ref(),
+            )
+            .unwrap();
+        let result = judge.process(&ixn_c);
+        assert!(result.is_err(), "events after duplicity must be rejected");
+
+        // DEL must not have grown
+        assert_eq!(judge.del().len(), 1);
     }
 }

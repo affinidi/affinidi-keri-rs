@@ -65,13 +65,7 @@ pub struct Version {
 
 impl Version {
     /// Create a new Version.
-    pub fn new(
-        protocol: &str,
-        major: u8,
-        minor: u8,
-        kind: SerializationKind,
-        size: usize,
-    ) -> Self {
+    pub fn new(protocol: &str, major: u8, minor: u8, kind: SerializationKind, size: usize) -> Self {
         Self {
             protocol: protocol.to_string(),
             major,
@@ -101,9 +95,8 @@ impl Version {
             )));
         }
 
-        let vs = std::str::from_utf8(&data[..KERI_VER_FULLSIZE]).map_err(|_| {
-            CoreError::InvalidVersion("version string is not valid UTF-8".into())
-        })?;
+        let vs = std::str::from_utf8(&data[..KERI_VER_FULLSIZE])
+            .map_err(|_| CoreError::InvalidVersion("version string is not valid UTF-8".into()))?;
 
         Self::parse_str(vs)
     }
@@ -140,9 +133,8 @@ impl Version {
 
         // Size: chars 10..16 (6 hex digits)
         let size_str = &vs[10..16];
-        let size = usize::from_str_radix(size_str, 16).map_err(|_| {
-            CoreError::InvalidVersion(format!("invalid hex size: {size_str}"))
-        })?;
+        let size = usize::from_str_radix(size_str, 16)
+            .map_err(|_| CoreError::InvalidVersion(format!("invalid hex size: {size_str}")))?;
 
         // Terminator: char 16 must be '_'
         if vs.as_bytes()[16] != b'_' {
@@ -288,9 +280,18 @@ mod tests {
 
     #[test]
     fn test_serialization_kind_from_tag() {
-        assert_eq!(SerializationKind::from_tag("JSON").unwrap(), SerializationKind::Json);
-        assert_eq!(SerializationKind::from_tag("CBOR").unwrap(), SerializationKind::Cbor);
-        assert_eq!(SerializationKind::from_tag("MGPK").unwrap(), SerializationKind::MsgPack);
+        assert_eq!(
+            SerializationKind::from_tag("JSON").unwrap(),
+            SerializationKind::Json
+        );
+        assert_eq!(
+            SerializationKind::from_tag("CBOR").unwrap(),
+            SerializationKind::Cbor
+        );
+        assert_eq!(
+            SerializationKind::from_tag("MGPK").unwrap(),
+            SerializationKind::MsgPack
+        );
         assert!(SerializationKind::from_tag("XXXX").is_err());
     }
 

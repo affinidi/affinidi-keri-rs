@@ -4,7 +4,7 @@
 //! by processing its key event log (KEL). It validates signatures,
 //! sequence numbers, and prior event digests.
 
-use affinidi_keri_crypto::{Siger, Verfer};
+use affinidi_keri_crypto::{Diger, Siger, Verfer};
 
 use crate::error::CoreError;
 use crate::event::{InceptionEvent, InteractionEvent, RotationEvent};
@@ -70,12 +70,10 @@ impl Kever {
         }
 
         // Verify signatures against the serialized event body
-        Self::verify_sigs_static(
-            serder.raw(),
-            sigs,
-            verfers,
-            &icp.keys_threshold.0,
-        )?;
+        Self::verify_sigs_static(serder.raw(), sigs, verfers, &icp.keys_threshold.0)?;
+
+        // Validate prefix derivation (self-addressing: i == d, basic: i == keys[0])
+        Self::validate_prefix_derivation(&icp)?;
 
         // Derive initial key state
         let state = KeyState::from_inception(&icp)?;
@@ -110,8 +108,7 @@ impl Kever {
         // Verify SAID integrity before trusting any event fields
         said::verify_said(&sad, "d", "E", SerializationKind::Json)?;
 
-        let icp: InceptionEvent =
-            serde_json::from_value(sad).map_err(CoreError::Json)?;
+        let icp: InceptionEvent = serde_json::from_value(sad).map_err(CoreError::Json)?;
 
         if icp.keys.len() != verfers.len() {
             return Err(CoreError::Validation(format!(
@@ -131,6 +128,9 @@ impl Kever {
         }
 
         Self::verify_sigs_static(raw, sigs, verfers, &icp.keys_threshold.0)?;
+
+        // Validate prefix derivation (self-addressing: i == d, basic: i == keys[0])
+        Self::validate_prefix_derivation(&icp)?;
 
         let state = KeyState::from_inception(&icp)?;
 
@@ -174,12 +174,7 @@ impl Kever {
         let verfers = self.build_verfers()?;
 
         // Verify signatures against current keys
-        Self::verify_sigs_static(
-            serder.raw(),
-            sigs,
-            &verfers,
-            &self.state.threshold,
-        )?;
+        Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
 
         match ilk.as_str() {
             "rot" => {
@@ -208,11 +203,7 @@ impl Kever {
     /// This avoids cloning the entire Kever for rollback support: the caller
     /// can inspect the proposed state (e.g. to verify witness receipts) before
     /// committing with [`apply_verified_update`].
-    pub fn verify_update(
-        &self,
-        serder: &Serder,
-        sigs: &[Siger],
-    ) -> Result<KeyState, CoreError> {
+    pub fn verify_update(&self, serder: &Serder, sigs: &[Siger]) -> Result<KeyState, CoreError> {
         if !self.incepted {
             return Err(CoreError::Validation(
                 "kever not initialized with inception event".into(),
@@ -300,13 +291,11 @@ impl Kever {
 
         let new_state = match ilk.as_str() {
             "rot" => {
-                let rot: RotationEvent =
-                    serde_json::from_value(sad).map_err(CoreError::Json)?;
+                let rot: RotationEvent = serde_json::from_value(sad).map_err(CoreError::Json)?;
                 self.state.apply_rotation(&rot)?
             }
             "ixn" => {
-                let ixn: InteractionEvent =
-                    serde_json::from_value(sad).map_err(CoreError::Json)?;
+                let ixn: InteractionEvent = serde_json::from_value(sad).map_err(CoreError::Json)?;
                 self.state.apply_interaction(&ixn)?
             }
             _ => {
@@ -424,6 +413,39 @@ impl Kever {
         Ok(verfers)
     }
 
+    /// Validate that the inception event's prefix is correctly derived.
+    ///
+    /// Per the KERI spec, there are two valid derivation methods:
+    /// - **Self-addressing**: prefix code is a digest code (`E`, `F`, etc.)
+    ///   and the prefix MUST equal the event SAID (`i == d`).
+    /// - **Basic**: prefix code is a public-key code (`B`, `D`, `1AAB`, etc.)
+    ///   and the prefix MUST equal the first public key in the event.
+    fn validate_prefix_derivation(icp: &InceptionEvent) -> Result<(), CoreError> {
+        // Self-addressing AID: prefix is a digest
+        if Diger::from_qb64(&icp.prefix).is_ok() {
+            if icp.prefix != icp.said {
+                return Err(CoreError::InvalidPrefix(
+                    "self-addressing prefix does not match event SAID (i != d)".into(),
+                ));
+            }
+            return Ok(());
+        }
+
+        // Basic AID: prefix is a public key
+        if Verfer::from_qb64(&icp.prefix).is_ok() {
+            if icp.keys.is_empty() || icp.prefix != icp.keys[0] {
+                return Err(CoreError::InvalidPrefix(
+                    "basic prefix does not match first public key".into(),
+                ));
+            }
+            return Ok(());
+        }
+
+        Err(CoreError::InvalidPrefix(
+            "prefix is neither a valid digest code nor a valid key code".into(),
+        ))
+    }
+
     /// Static helper to verify indexed signatures against a key set and threshold.
     fn verify_sigs_static(
         message: &[u8],
@@ -500,15 +522,9 @@ mod tests {
     /// Helper: build an inception event SAD, compute its SAID, and return the Serder.
     /// `next_signers` are the keys committed to for the first rotation.
     fn build_inception_serder(signers: &[&Signer], next_signers: &[&Signer]) -> Serder {
-        let keys: Vec<String> = signers
-            .iter()
-            .map(|s| s.verfer().qb64().unwrap())
-            .collect();
+        let keys: Vec<String> = signers.iter().map(|s| s.verfer().qb64().unwrap()).collect();
 
-        let next_keys: Vec<String> = next_signers
-            .iter()
-            .map(|s| next_key_digest(s))
-            .collect();
+        let next_keys: Vec<String> = next_signers.iter().map(|s| next_key_digest(s)).collect();
 
         let mut sad = serde_json::json!({
             "v": "KERI10JSON000000_",
@@ -541,15 +557,9 @@ mod tests {
         signers: &[&Signer],
         next_signers: &[&Signer],
     ) -> Serder {
-        let keys: Vec<String> = signers
-            .iter()
-            .map(|s| s.verfer().qb64().unwrap())
-            .collect();
+        let keys: Vec<String> = signers.iter().map(|s| s.verfer().qb64().unwrap()).collect();
 
-        let next_keys: Vec<String> = next_signers
-            .iter()
-            .map(|s| next_key_digest(s))
-            .collect();
+        let next_keys: Vec<String> = next_signers.iter().map(|s| next_key_digest(s)).collect();
 
         let mut sad = serde_json::json!({
             "v": "KERI10JSON000000_",
@@ -671,8 +681,7 @@ mod tests {
         let prior_said = kever.state().last_event_digest.clone();
 
         // Rotation to signer2, committing to signer3 for next rotation
-        let rot_serder =
-            build_rotation_serder(&prefix, 1, &prior_said, &[&signer2], &[&signer3]);
+        let rot_serder = build_rotation_serder(&prefix, 1, &prior_said, &[&signer2], &[&signer3]);
 
         // Sign rotation with CURRENT keys (signer1)
         let rot_sig = signer1.sign_indexed(rot_serder.raw(), 0, true).unwrap();
@@ -886,11 +895,112 @@ mod tests {
 
         // Sign with only 1 signature (threshold is 2) - should fail
         let sig1 = signer1.sign_indexed(serder.raw(), 0, true).unwrap();
-        assert!(Kever::new(&serder, &[sig1.clone()], &verfers).is_err());
+        assert!(Kever::new(&serder, std::slice::from_ref(&sig1), &verfers).is_err());
 
         // Sign with 2 signatures - should succeed
         let sig2 = signer2.sign_indexed(serder.raw(), 1, true).unwrap();
         let kever = Kever::new(&serder, &[sig1, sig2], &verfers).unwrap();
         assert!(kever.incepted);
+    }
+
+    /// Regression test: crafting a non-self-addressing inception with a spoofed
+    /// prefix must be rejected. This is the exact attack vector where an attacker
+    /// sets `"i"` to a victim's prefix while `"d"` is the attacker's own SAID.
+    #[test]
+    fn test_reject_spoofed_prefix_attack() {
+        let attacker = make_signer(66);
+        let attacker_next = make_signer(67);
+
+        let keys: Vec<String> = vec![attacker.verfer().qb64().unwrap()];
+        let next_keys: Vec<String> = vec![next_key_digest(&attacker_next)];
+
+        // Victim's prefix (in a real attack this would be observed from the network)
+        let victim_prefix = "EBWnTcz-EszJ6AiQ0RLBP_UdBFbDeCfP1t7O4APHxE7E";
+
+        // Build the inception event with i = victim's prefix, d = "" (different from i).
+        // compute_said will see i != d and only replace d, leaving i as the victim's prefix.
+        let mut sad = serde_json::json!({
+            "v": "KERI10JSON000000_",
+            "t": "icp",
+            "d": "",
+            "i": victim_prefix,
+            "s": "0",
+            "kt": "1",
+            "k": keys,
+            "nt": "1",
+            "n": next_keys,
+            "bt": "0",
+            "b": [],
+            "c": [],
+            "a": []
+        });
+
+        fix_version_string(&mut sad);
+        said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
+
+        // Verify: i != d (this is the attack — non-self-addressing with spoofed prefix)
+        assert_ne!(sad["i"].as_str().unwrap(), sad["d"].as_str().unwrap());
+
+        // SAID verification passes (the vulnerability: d is valid, i is unchecked)
+        said::verify_said(&sad, "d", "E", SerializationKind::Json).unwrap();
+
+        let serder = Serder::new(SerializationKind::Json, sad).unwrap();
+        let sig = attacker.sign_indexed(serder.raw(), 0, true).unwrap();
+        let verfer = attacker.verfer().clone();
+
+        // The fix: Kever::new must reject this because the self-addressing
+        // prefix does not match the SAID
+        let result = Kever::new(&serder, &[sig], &[verfer]);
+        assert!(result.is_err(), "spoofed prefix inception must be rejected");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("self-addressing prefix does not match event SAID"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Verify that a basic (non-self-addressing) prefix must match the first key.
+    #[test]
+    fn test_reject_basic_prefix_mismatch() {
+        let signer = make_signer(42);
+        let next_signer = make_signer(43);
+
+        let keys: Vec<String> = vec![signer.verfer().qb64().unwrap()];
+        let next_keys: Vec<String> = vec![next_key_digest(&next_signer)];
+
+        // Use a different key as prefix (not the signer's key)
+        let wrong_signer = make_signer(99);
+        let wrong_prefix = wrong_signer.verfer().qb64().unwrap();
+
+        let mut sad = serde_json::json!({
+            "v": "KERI10JSON000000_",
+            "t": "icp",
+            "d": "",
+            "i": wrong_prefix,
+            "s": "0",
+            "kt": "1",
+            "k": keys,
+            "nt": "1",
+            "n": next_keys,
+            "bt": "0",
+            "b": [],
+            "c": [],
+            "a": []
+        });
+
+        fix_version_string(&mut sad);
+        said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
+
+        let serder = Serder::new(SerializationKind::Json, sad).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let verfer = signer.verfer().clone();
+
+        let result = Kever::new(&serder, &[sig], &[verfer]);
+        assert!(result.is_err(), "mismatched basic prefix must be rejected");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("basic prefix does not match first public key"),
+            "unexpected error: {err}"
+        );
     }
 }

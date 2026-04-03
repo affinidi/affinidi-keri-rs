@@ -15,7 +15,7 @@ integrity in direct mode communication.
 
 ## Architecture
 
-The workspace contains five crates that build on each other in layers:
+The workspace contains four crates that build on each other in layers:
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -33,20 +33,14 @@ The workspace contains five crates that build on each other in layers:
        ┌──────────▼───────────┐
        │ affinidi-keri-crypto  │
        │ Cryptographic prims   │
-       └──────────┬───────────┘
-                  │
-          ┌───────▼────────┐
-          │  affinidi-cesr  │
-          │ CESR encoding   │
-          └────────────────┘
+       └──────────────────────┘
 ```
 
 ## Components
 
 | Crate | Description |
 | ----- | ----------- |
-| [affinidi-cesr](crates/affinidi-cesr/) | CESR (Composable Event Streaming Representation) encoding and decoding — matter primitives, counters, indexers, and code tables |
-| [affinidi-keri-crypto](crates/affinidi-keri-crypto/) | Cryptographic primitives — signing (Ed25519, secp256k1, P-256), digests (Blake2/3, SHA2/3), key derivation (Argon2), and verification |
+| [affinidi-keri-crypto](crates/affinidi-keri-crypto/) | Cryptographic primitives — signing (Ed25519, secp256k1, P-256), digests (Blake2/3, SHA2/3), key derivation (Argon2), and verification. CESR encoding is provided by [affinidi-cesr](https://crates.io/crates/affinidi-cesr) |
 | [affinidi-keri-core](crates/affinidi-keri-core/) | Core KERI protocol — event structures (inception, rotation, interaction, delegation, receipts), KEL verification, serialization, and parsing |
 | [affinidi-keri-db](crates/affinidi-keri-db/) | Storage layer — LMDB-backed persistence for events, key event logs, signatures, witness receipts, key state, and escrow |
 | [affinidi-keri](crates/affinidi-keri/) | High-level identity management — Hab (single identifier), Habery (multi-identifier registry), direct mode message processing, Judge (duplicity detection), and configuration |

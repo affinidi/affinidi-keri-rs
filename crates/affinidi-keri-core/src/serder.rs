@@ -6,7 +6,7 @@
 
 use crate::error::CoreError;
 use crate::said;
-use crate::version::{SerializationKind, Version, KERI_VER_FULLSIZE};
+use crate::version::{KERI_VER_FULLSIZE, SerializationKind, Version};
 
 /// A KERI message serializer/deserializer.
 ///
@@ -246,9 +246,7 @@ fn extract_version_from_raw(data: &[u8], _kind: SerializationKind) -> Option<Ver
     // Look for a known protocol prefix in the raw bytes
     let protocols = [b"KERI" as &[u8], b"ACDC", b"SAID"];
     for proto in &protocols {
-        if let Some(pos) = data
-            .windows(proto.len())
-            .position(|w| w == *proto)
+        if let Some(pos) = data.windows(proto.len()).position(|w| w == *proto)
             && pos + KERI_VER_FULLSIZE <= data.len()
             && let Ok(ver) = Version::parse(&data[pos..])
         {
@@ -284,8 +282,7 @@ fn serialize_value(
         SerializationKind::Json => serde_json::to_vec(value).map_err(CoreError::Json),
         SerializationKind::Cbor => {
             let mut buf = Vec::new();
-            ciborium::into_writer(value, &mut buf)
-                .map_err(|e| CoreError::Cbor(e.to_string()))?;
+            ciborium::into_writer(value, &mut buf).map_err(|e| CoreError::Cbor(e.to_string()))?;
             Ok(buf)
         }
         SerializationKind::MsgPack => {
@@ -295,10 +292,7 @@ fn serialize_value(
 }
 
 /// Deserialize bytes to a serde_json::Value from the specified format.
-fn deserialize_value(
-    data: &[u8],
-    kind: SerializationKind,
-) -> Result<serde_json::Value, CoreError> {
+fn deserialize_value(data: &[u8], kind: SerializationKind) -> Result<serde_json::Value, CoreError> {
     match kind {
         SerializationKind::Json => serde_json::from_slice(data).map_err(CoreError::Json),
         SerializationKind::Cbor => {
@@ -448,7 +442,10 @@ mod tests {
 
     #[test]
     fn test_sniff_kind_json() {
-        assert_eq!(sniff_kind(b"{\"v\":\"test\"}").unwrap(), SerializationKind::Json);
+        assert_eq!(
+            sniff_kind(b"{\"v\":\"test\"}").unwrap(),
+            SerializationKind::Json
+        );
     }
 
     #[test]
@@ -458,7 +455,10 @@ mod tests {
 
     #[test]
     fn test_sniff_kind_msgpack() {
-        assert_eq!(sniff_kind(&[0x82, 0xa1]).unwrap(), SerializationKind::MsgPack);
+        assert_eq!(
+            sniff_kind(&[0x82, 0xa1]).unwrap(),
+            SerializationKind::MsgPack
+        );
     }
 
     #[test]

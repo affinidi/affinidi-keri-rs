@@ -11,21 +11,12 @@ use crate::keys;
 use crate::store::KeriStore;
 
 /// Configuration for opening an LMDB store with optional performance flags.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LmdbStoreConfig {
     /// If true, skip fsync on each commit (faster but risks data loss on crash).
     pub no_sync: bool,
     /// If true, use a writable memory map with async flushes.
     pub write_map: bool,
-}
-
-impl Default for LmdbStoreConfig {
-    fn default() -> Self {
-        Self {
-            no_sync: false,
-            write_map: false,
-        }
-    }
 }
 
 /// Maximum LMDB map size (1 GiB).
@@ -467,9 +458,18 @@ mod tests {
         store.append_kel(prefix, 1, "Esaid1").unwrap();
         store.append_kel(prefix, 2, "Esaid2").unwrap();
 
-        assert_eq!(store.get_kel_said(prefix, 0).unwrap(), Some("Esaid0".to_string()));
-        assert_eq!(store.get_kel_said(prefix, 1).unwrap(), Some("Esaid1".to_string()));
-        assert_eq!(store.get_kel_said(prefix, 2).unwrap(), Some("Esaid2".to_string()));
+        assert_eq!(
+            store.get_kel_said(prefix, 0).unwrap(),
+            Some("Esaid0".to_string())
+        );
+        assert_eq!(
+            store.get_kel_said(prefix, 1).unwrap(),
+            Some("Esaid1".to_string())
+        );
+        assert_eq!(
+            store.get_kel_said(prefix, 2).unwrap(),
+            Some("Esaid2".to_string())
+        );
         assert!(store.get_kel_said(prefix, 3).unwrap().is_none());
 
         let kel = store.get_kel(prefix).unwrap();
@@ -522,10 +522,7 @@ mod tests {
         store.put_hab("alice", b"alice config").unwrap();
         store.put_hab("bob", b"bob config").unwrap();
 
-        assert_eq!(
-            store.get_hab("alice").unwrap().unwrap(),
-            b"alice config"
-        );
+        assert_eq!(store.get_hab("alice").unwrap().unwrap(), b"alice config");
 
         let names = store.list_habs().unwrap();
         assert_eq!(names.len(), 2);

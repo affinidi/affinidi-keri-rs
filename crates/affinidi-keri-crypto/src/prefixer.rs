@@ -79,7 +79,11 @@ impl Prefixer {
 
     /// Verify that this prefix matches a given verfer (for basic prefixes).
     pub fn verify_basic(&self, verfer: &Verfer) -> bool {
-        let code_eq = self.matter.code().as_bytes().ct_eq(verfer.code().as_bytes());
+        let code_eq = self
+            .matter
+            .code()
+            .as_bytes()
+            .ct_eq(verfer.code().as_bytes());
         let raw_eq = self.matter.raw().ct_eq(verfer.raw());
         (code_eq & raw_eq).into()
     }

@@ -26,8 +26,8 @@ use affinidi_keri::hab::Hab;
 use affinidi_keri_core::kever::Kever;
 use affinidi_keri_core::parser::{self, Attachment};
 use affinidi_keri_core::serder::Serder;
-use affinidi_keri_db::lmdb::LmdbStore;
 use affinidi_keri_db::KeriStore;
+use affinidi_keri_db::lmdb::LmdbStore;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("╔══════════════════════════════════════════════════════════════╗");
@@ -73,15 +73,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("  Witness alpha:  {wit1_prefix}");
     println!("    transferable: false");
-    println!("    verfer code:  {} (Ed25519 non-transferable)", wit1.signers()[0].verfer().code());
+    println!(
+        "    verfer code:  {} (Ed25519 non-transferable)",
+        wit1.signers()[0].verfer().code()
+    );
     println!();
     println!("  Witness beta:   {wit2_prefix}");
     println!("    transferable: false");
-    println!("    verfer code:  {} (Ed25519 non-transferable)", wit2.signers()[0].verfer().code());
+    println!(
+        "    verfer code:  {} (Ed25519 non-transferable)",
+        wit2.signers()[0].verfer().code()
+    );
     println!();
     println!("  Witness gamma:  {wit3_prefix}");
     println!("    transferable: false");
-    println!("    verfer code:  {} (Ed25519 non-transferable)", wit3.signers()[0].verfer().code());
+    println!(
+        "    verfer code:  {} (Ed25519 non-transferable)",
+        wit3.signers()[0].verfer().code()
+    );
     println!();
     println!("  Key insight: code \"B\" means the prefix IS the public key.");
     println!("  No KEL lookup needed — we can verify receipts directly.");
@@ -116,7 +125,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let icp_json: serde_json::Value = serde_json::from_slice(icp_serder.raw())?;
     println!("  Controller AID: {}", ctrl.prefix());
     println!("  Inception event (showing witness fields):");
-    println!("    bt: {}  (backer threshold — receipts needed)", icp_json["bt"]);
+    println!(
+        "    bt: {}  (backer threshold — receipts needed)",
+        icp_json["bt"]
+    );
     println!("    b:  [");
     if let Some(arr) = icp_json["b"].as_array() {
         for (i, b) in arr.iter().enumerate() {
@@ -150,7 +162,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("  Witness alpha receipt: {} bytes", rct1.len());
     println!("    counter: -D (non-transferable receipt couples)");
-    println!("    format:  -DAB + prefix(44) + cigar(88) = {} bytes", rct1.len());
+    println!(
+        "    format:  -DAB + prefix(44) + cigar(88) = {} bytes",
+        rct1.len()
+    );
     println!();
     println!("  Witness beta receipt:  {} bytes", rct2.len());
     println!("  Witness gamma receipt: {} bytes", rct3.len());
@@ -190,7 +205,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, att) in parsed.attachments.iter().enumerate() {
         match att {
             Attachment::ControllerSigs(sigs) => {
-                println!("    [{i}] -B ControllerSigs: {} indexed signature(s)", sigs.len());
+                println!(
+                    "    [{i}] -B ControllerSigs: {} indexed signature(s)",
+                    sigs.len()
+                );
             }
             Attachment::ReceiptCouples(couples) => {
                 println!(
@@ -239,7 +257,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("    controller sigs:  VERIFIED (threshold met)");
     println!("    witness receipts: VERIFIED (2-of-3 threshold met, 3 provided)");
     println!("    backer_threshold: {}", kever.state().backer_threshold);
-    println!("    backers:          {} designated witnesses", kever.state().backers.len());
+    println!(
+        "    backers:          {} designated witnesses",
+        kever.state().backers.len()
+    );
     println!();
 
     // ─────────────────────────────────────────────────────────────────────
@@ -261,8 +282,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let rot_json: serde_json::Value = serde_json::from_slice(rot_serder.raw())?;
     println!("  Rotation event (sn={}):", r2.sn);
-    println!("    new signing key: {}", rot_json["k"][0].as_str().unwrap_or(""));
-    println!("    prior SAID:      {}", rot_json["p"].as_str().unwrap_or(""));
+    println!(
+        "    new signing key: {}",
+        rot_json["k"][0].as_str().unwrap_or("")
+    );
+    println!(
+        "    prior SAID:      {}",
+        rot_json["p"].as_str().unwrap_or("")
+    );
     println!("    witnesses:       alpha + beta receipted (2-of-3)");
     println!("    verification:    PASSED");
     println!();
@@ -280,8 +307,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ixn_msg = ctrl.interact(&[anchor], &ctrl_store)?;
 
     let ixn_serder = Serder::from_raw(&ixn_msg)?;
-    let ixn_witness_att =
-        Hab::compose_witness_receipt_attachment(&ixn_serder, &[&wit2, &wit3])?;
+    let ixn_witness_att = Hab::compose_witness_receipt_attachment(&ixn_serder, &[&wit2, &wit3])?;
     let mut ixn_witnessed = ixn_msg.clone();
     ixn_witnessed.extend_from_slice(&ixn_witness_att);
 
@@ -306,8 +332,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ixn2_serder = Serder::from_raw(&ixn2_msg)?;
 
     // Only 1 witness out of required 2
-    let ixn2_partial_att =
-        Hab::compose_witness_receipt_attachment(&ixn2_serder, &[&wit1])?;
+    let ixn2_partial_att = Hab::compose_witness_receipt_attachment(&ixn2_serder, &[&wit1])?;
     let mut ixn2_partial = ixn2_msg.clone();
     ixn2_partial.extend_from_slice(&ixn2_partial_att);
 
@@ -328,20 +353,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     direct::process_message(&icp_full_for_bad, &bad_store, &mut bad_kevers)?;
     // Re-process the rotation and first interaction so sn is current
     let rot_full_for_bad = {
-        let att = Hab::compose_witness_receipt_attachment(
-            &Serder::from_raw(&rot_msg)?,
-            &[&wit1, &wit2],
-        )?;
+        let att =
+            Hab::compose_witness_receipt_attachment(&Serder::from_raw(&rot_msg)?, &[&wit1, &wit2])?;
         let mut m = rot_msg.clone();
         m.extend_from_slice(&att);
         m
     };
     direct::process_message(&rot_full_for_bad, &bad_store, &mut bad_kevers)?;
     let ixn_full_for_bad = {
-        let att = Hab::compose_witness_receipt_attachment(
-            &Serder::from_raw(&ixn_msg)?,
-            &[&wit2, &wit3],
-        )?;
+        let att =
+            Hab::compose_witness_receipt_attachment(&Serder::from_raw(&ixn_msg)?, &[&wit2, &wit3])?;
         let mut m = ixn_msg.clone();
         m.extend_from_slice(&att);
         m
@@ -365,8 +386,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Now provide enough receipts — should succeed
-    let ixn2_full_att =
-        Hab::compose_witness_receipt_attachment(&ixn2_serder, &[&wit1, &wit3])?;
+    let ixn2_full_att = Hab::compose_witness_receipt_attachment(&ixn2_serder, &[&wit1, &wit3])?;
     let mut ixn2_full = ixn2_msg.clone();
     ixn2_full.extend_from_slice(&ixn2_full_att);
 
@@ -400,26 +420,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let ilk = serder.ilk()?;
             let sad: serde_json::Value = serde_json::from_slice(serder.raw())?;
 
-            println!(
-                "  ┌─ SN={sn}  ilk={ilk}  said={}...",
-                &event_said[..28]
-            );
+            println!("  ┌─ SN={sn}  ilk={ilk}  said={}...", &event_said[..28]);
 
             match ilk.as_str() {
                 "icp" => {
-                    println!(
-                        "  │  signing key:  {}",
-                        sad["k"][0].as_str().unwrap_or("")
-                    );
+                    println!("  │  signing key:  {}", sad["k"][0].as_str().unwrap_or(""));
                     println!("  │  bt={}, witnesses={}", sad["bt"], {
                         sad["b"].as_array().map_or(0, |a| a.len())
                     });
                 }
                 "rot" => {
-                    println!(
-                        "  │  new key:      {}",
-                        sad["k"][0].as_str().unwrap_or("")
-                    );
+                    println!("  │  new key:      {}", sad["k"][0].as_str().unwrap_or(""));
                     println!(
                         "  │  prior:        {}...",
                         &sad["p"].as_str().unwrap_or("")[..28]

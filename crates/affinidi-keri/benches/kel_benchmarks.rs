@@ -14,9 +14,7 @@ fn generate_kel() -> (Vec<Vec<u8>>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let store = LmdbStore::open(dir.path()).unwrap();
 
-    let config = InceptionConfig::builder()
-        .salt(vec![0x42u8; 16])
-        .build();
+    let config = InceptionConfig::builder().salt(vec![0x42u8; 16]).build();
 
     let (mut hab, icp_msg) = Hab::incept("bench", &config, &store).unwrap();
     let mut messages = Vec::with_capacity(ROTATION_COUNT + 1);
@@ -42,9 +40,7 @@ fn kel_creation(c: &mut Criterion) {
                 (dir, store)
             },
             |(_dir, store)| {
-                let config = InceptionConfig::builder()
-                    .salt(vec![0x42u8; 16])
-                    .build();
+                let config = InceptionConfig::builder().salt(vec![0x42u8; 16]).build();
                 Hab::incept("bench", &config, &store).unwrap()
             },
             BatchSize::SmallInput,
@@ -56,15 +52,11 @@ fn kel_creation(c: &mut Criterion) {
             || {
                 let dir = tempfile::tempdir().unwrap();
                 let store = LmdbStore::open(dir.path()).unwrap();
-                let config = InceptionConfig::builder()
-                    .salt(vec![0x42u8; 16])
-                    .build();
+                let config = InceptionConfig::builder().salt(vec![0x42u8; 16]).build();
                 let (hab, _) = Hab::incept("bench", &config, &store).unwrap();
                 (dir, store, hab)
             },
-            |(_dir, store, mut hab)| {
-                hab.rotate(&RotationConfig::default(), &store).unwrap()
-            },
+            |(_dir, store, mut hab)| hab.rotate(&RotationConfig::default(), &store).unwrap(),
             BatchSize::SmallInput,
         );
     });
@@ -75,14 +67,15 @@ fn kel_creation(c: &mut Criterion) {
 fn kel_resolution(c: &mut Criterion) {
     let mut group = c.benchmark_group("kel_resolution");
 
-    let bench_config = LmdbStoreConfig { no_sync: true, ..Default::default() };
+    let bench_config = LmdbStoreConfig {
+        no_sync: true,
+        ..Default::default()
+    };
 
     group.bench_function("single_event", |b| {
         let setup_dir = tempfile::tempdir().unwrap();
         let setup_store = LmdbStore::open(setup_dir.path()).unwrap();
-        let config = InceptionConfig::builder()
-            .salt(vec![0x42u8; 16])
-            .build();
+        let config = InceptionConfig::builder().salt(vec![0x42u8; 16]).build();
         let (_, icp_msg) = Hab::incept("bench", &config, &setup_store).unwrap();
 
         b.iter_batched(
@@ -124,7 +117,10 @@ fn kel_resolution(c: &mut Criterion) {
 fn kel_resolution_with_judge(c: &mut Criterion) {
     let mut group = c.benchmark_group("kel_resolution_with_judge");
 
-    let bench_config = LmdbStoreConfig { no_sync: true, ..Default::default() };
+    let bench_config = LmdbStoreConfig {
+        no_sync: true,
+        ..Default::default()
+    };
 
     group.bench_function("full_history_120_rotations", |b| {
         let (messages, _gen_dir) = generate_kel();
@@ -151,5 +147,10 @@ fn kel_resolution_with_judge(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, kel_creation, kel_resolution, kel_resolution_with_judge);
+criterion_group!(
+    benches,
+    kel_creation,
+    kel_resolution,
+    kel_resolution_with_judge
+);
 criterion_main!(benches);

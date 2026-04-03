@@ -9,9 +9,9 @@
 //! - `"med"` - moderate (m=262144, t=3, p=1)
 //! - `"high"` - slow, high memory (m=1048576, t=4, p=1)
 
-use affinidi_cesr::Matter;
 use crate::error::CryptoError;
 use crate::signer::Signer;
+use affinidi_cesr::Matter;
 
 /// Default salt code in CESR (128-bit random salt, code "0A").
 const SALT_CODE: &str = "0A";
@@ -96,11 +96,7 @@ impl Salter {
         use argon2::Argon2;
 
         let params = Self::tier_params(tier, output_len)?;
-        let argon2 = Argon2::new(
-            argon2::Algorithm::Argon2id,
-            argon2::Version::V0x13,
-            params,
-        );
+        let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
 
         // The path is used as the "password" and the salt raw bytes as the salt.
         let password = path.as_bytes();
@@ -117,9 +113,9 @@ impl Salter {
     /// Get Argon2id parameters for a given tier.
     fn tier_params(tier: &str, output_len: usize) -> Result<argon2::Params, CryptoError> {
         let (m_cost, t_cost, p_cost) = match tier {
-            "low" => (65536, 2, 1),      // ~64 MiB, 2 iterations
-            "med" => (262144, 3, 1),     // ~256 MiB, 3 iterations
-            "high" => (1048576, 4, 1),   // ~1 GiB, 4 iterations
+            "low" => (65536, 2, 1),    // ~64 MiB, 2 iterations
+            "med" => (262144, 3, 1),   // ~256 MiB, 3 iterations
+            "high" => (1048576, 4, 1), // ~1 GiB, 4 iterations
             _ => {
                 return Err(CryptoError::KeyDerivation(format!(
                     "unknown tier: {tier}, expected 'low', 'med', or 'high'"
@@ -134,7 +130,7 @@ impl Salter {
     /// Get the expected key size for a signer code.
     fn key_size_for_code(code: &str) -> Result<usize, CryptoError> {
         match code {
-            "A" => Ok(32),           // Ed25519: 32-byte seed
+            "A" => Ok(32),             // Ed25519: 32-byte seed
             "1AAA" | "1AAB" => Ok(32), // secp256k1: 32-byte scalar
             "1AAI" | "1AAJ" => Ok(32), // secp256r1: 32-byte scalar
             _ => Err(CryptoError::UnsupportedAlgorithm(format!(

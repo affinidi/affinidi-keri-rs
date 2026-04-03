@@ -10,8 +10,8 @@ use affinidi_keri::direct;
 use affinidi_keri::hab::Hab;
 use affinidi_keri_core::kever::Kever;
 use affinidi_keri_core::serder::Serder;
-use affinidi_keri_db::lmdb::LmdbStore;
 use affinidi_keri_db::KeriStore;
+use affinidi_keri_db::lmdb::LmdbStore;
 
 fn temp_store() -> LmdbStore {
     let dir = tempfile::tempdir().unwrap();
@@ -20,10 +20,7 @@ fn temp_store() -> LmdbStore {
 
 /// Helper: compose a full witnessed message by appending witness receipt
 /// couples to the controller's event message.
-fn compose_witnessed_message(
-    ctrl_msg: &[u8],
-    witnesses: &[&Hab],
-) -> Vec<u8> {
+fn compose_witnessed_message(ctrl_msg: &[u8], witnesses: &[&Hab]) -> Vec<u8> {
     let ctrl_serder = Serder::from_raw(ctrl_msg).unwrap();
     let witness_attachment =
         Hab::compose_witness_receipt_attachment(&ctrl_serder, witnesses).unwrap();
@@ -134,9 +131,7 @@ fn test_witness_receipt_message_stored() {
     let (witness, _) = Hab::incept("witness", &w_config, &w_store).unwrap();
 
     let ctrl_store = temp_store();
-    let ctrl_config = InceptionConfig::builder()
-        .salt(vec![0x01u8; 16])
-        .build();
+    let ctrl_config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
     let (_ctrl, ctrl_msg) = Hab::incept("ctrl", &ctrl_config, &ctrl_store).unwrap();
 
     // Have witness generate and store a receipt message
@@ -157,9 +152,7 @@ fn test_witness_receipt_message_stored() {
 fn test_inception_without_witnesses_still_works() {
     // Ensure backward compatibility: events with bt=0 work without witnesses
     let ctrl_store = temp_store();
-    let ctrl_config = InceptionConfig::builder()
-        .salt(vec![0x01u8; 16])
-        .build();
+    let ctrl_config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
     let (mut ctrl, icp_msg) = Hab::incept("ctrl", &ctrl_config, &ctrl_store).unwrap();
 
     let verifier_store = temp_store();

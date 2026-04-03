@@ -69,9 +69,7 @@ impl Escrow {
 
     /// Total number of entries across all escrow categories.
     pub fn total_count(&self) -> usize {
-        self.out_of_order_count()
-            + self.partially_signed_count()
-            + self.partially_witnessed_count()
+        self.out_of_order_count() + self.partially_signed_count() + self.partially_witnessed_count()
     }
 
     /// Add an out-of-order event to escrow.

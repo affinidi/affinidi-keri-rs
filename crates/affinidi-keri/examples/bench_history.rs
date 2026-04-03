@@ -52,7 +52,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // --- Setup phase (not timed) ---
-    let bench_config = LmdbStoreConfig { no_sync: true, ..Default::default() };
+    let bench_config = LmdbStoreConfig {
+        no_sync: true,
+        ..Default::default()
+    };
 
     // Create witness Habs if requested
     let mut witness_dirs = Vec::new();
@@ -129,7 +132,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  Throughput: {:.1} events/sec",
         total_events as f64 / gen_elapsed.as_secs_f64()
     );
-    println!("  KEL size:   {} bytes ({:.1} KB)", total_kel_bytes, total_kel_bytes as f64 / 1024.0);
+    println!(
+        "  KEL size:   {} bytes ({:.1} KB)",
+        total_kel_bytes,
+        total_kel_bytes as f64 / 1024.0
+    );
     println!("  Events:     {total_events}");
     println!();
 

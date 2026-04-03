@@ -87,7 +87,10 @@ mod tests {
             digest: "EBfxc4RiVY6saIFmUfEtG2F1HgVBhMiS36e2dNEb091_".into(),
         };
         let json = serde_json::to_string(&seal).unwrap();
-        assert_eq!(json, r#"{"d":"EBfxc4RiVY6saIFmUfEtG2F1HgVBhMiS36e2dNEb091_"}"#);
+        assert_eq!(
+            json,
+            r#"{"d":"EBfxc4RiVY6saIFmUfEtG2F1HgVBhMiS36e2dNEb091_"}"#
+        );
     }
 
     #[test]
@@ -103,7 +106,10 @@ mod tests {
             root: "EBfxc4RiVY6saIFmUfEtG2F1HgVBhMiS36e2dNEb091_".into(),
         };
         let json = serde_json::to_string(&seal).unwrap();
-        assert_eq!(json, r#"{"rd":"EBfxc4RiVY6saIFmUfEtG2F1HgVBhMiS36e2dNEb091_"}"#);
+        assert_eq!(
+            json,
+            r#"{"rd":"EBfxc4RiVY6saIFmUfEtG2F1HgVBhMiS36e2dNEb091_"}"#
+        );
     }
 
     #[test]
