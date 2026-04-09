@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-04-09
+
+### Security
+
+- **[HIGH]** Reject non-ASCII bytes in KERI version string parsing (`Version::parse_str`). The KERI spec requires version strings to be pure ASCII, but the parser only validated UTF-8. Crafted multi-byte UTF-8 sequences crossing fixed byte-offset slice boundaries caused a panic, enabling unauthenticated remote denial of service.
+- **[HIGH]** Reject non-ASCII bytes in CESR attachment parsing (`parser.rs`). The CESR parser converted attacker-controlled bytes to `&str` via UTF-8 validation, then used fixed byte-offset slicing. Multi-byte UTF-8 characters at slice boundaries caused panics. Added ASCII guards in `parse_attachments`, `parse_indexed_sigs`, `parse_receipt_couples`, and `skip_counted_primitives`.
+
 ## [0.1.2] - 2026-04-03
 
 ### Security
