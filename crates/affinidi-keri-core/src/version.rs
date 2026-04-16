@@ -116,7 +116,7 @@ impl Version {
 
         // KERI spec requires version strings to be pure ASCII.
         // Reject non-ASCII to prevent panics from byte-indexing multi-byte UTF-8.
-        if !vs[..KERI_VER_FULLSIZE].is_ascii() {
+        if !vs.as_bytes()[..KERI_VER_FULLSIZE].is_ascii() {
             return Err(CoreError::InvalidVersion(
                 "version string contains non-ASCII bytes".into(),
             ));
