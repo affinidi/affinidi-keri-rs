@@ -114,6 +114,14 @@ impl Version {
             )));
         }
 
+        // KERI spec requires version strings to be pure ASCII.
+        // Reject non-ASCII to prevent panics from byte-indexing multi-byte UTF-8.
+        if !vs[..KERI_VER_FULLSIZE].is_ascii() {
+            return Err(CoreError::InvalidVersion(
+                "version string contains non-ASCII bytes".into(),
+            ));
+        }
+
         // Protocol: chars 0..4
         let protocol = &vs[0..4];
 
@@ -259,6 +267,25 @@ mod tests {
     #[test]
     fn test_fullsize_constant() {
         assert_eq!(KERI_VER_FULLSIZE, 17);
+    }
+
+    #[test]
+    fn test_parse_non_ascii_returns_error() {
+        // PoC from security report: multi-byte UTF-8 chars at offsets that
+        // would cause &str byte-indexing to panic without the ASCII guard.
+        // Bytes: KERI10 + ࠀ (3-byte) + 🦀 (4-byte) + padding
+        let payload = b"KERI10\xe0\xa0\x80\xf0\x9f\xa6\x80____";
+        let vs = std::str::from_utf8(payload).unwrap(); // valid UTF-8
+        let result = Version::parse_str(vs);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-ASCII"),);
+    }
+
+    #[test]
+    fn test_parse_non_ascii_via_bytes() {
+        // Same PoC via Version::parse (the &[u8] entry point)
+        let payload = b"KERI10\xe0\xa0\x80\xf0\x9f\xa6\x80____";
+        assert!(Version::parse(payload).is_err());
     }
 
     #[test]

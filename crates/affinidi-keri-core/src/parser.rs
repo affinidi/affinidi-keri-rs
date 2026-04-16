@@ -129,7 +129,14 @@ fn parse_attachments(data: &[u8]) -> Result<(Vec<Attachment>, usize), CoreError>
             break;
         }
 
-        // Try to parse a counter from the text
+        // Try to parse a counter from the text.
+        // CESR is Base64-encoded, so all valid data must be ASCII.
+        // Reject non-ASCII to prevent panics from byte-indexing multi-byte UTF-8.
+        if !data[offset..].is_ascii() {
+            return Err(CoreError::ParseError(
+                "attachment data contains non-ASCII bytes".into(),
+            ));
+        }
         let rest = std::str::from_utf8(&data[offset..])
             .map_err(|_| CoreError::ParseError("attachment data is not valid UTF-8".into()))?;
 
@@ -189,6 +196,13 @@ fn parse_indexed_sigs(data: &[u8], count: usize) -> Result<(Vec<Siger>, usize), 
         )));
     }
 
+    // CESR is Base64-encoded, so all valid data must be ASCII.
+    // Reject non-ASCII to prevent panics from byte-indexing multi-byte UTF-8.
+    if !data.is_ascii() {
+        return Err(CoreError::ParseError(
+            "indexed sig data contains non-ASCII bytes".into(),
+        ));
+    }
     let text = std::str::from_utf8(data)
         .map_err(|_| CoreError::ParseError("indexed sig data is not valid UTF-8".into()))?;
 
@@ -267,6 +281,13 @@ fn parse_receipt_couples(
         )));
     }
 
+    // CESR is Base64-encoded, so all valid data must be ASCII.
+    // Reject non-ASCII to prevent panics from byte-indexing multi-byte UTF-8.
+    if !data.is_ascii() {
+        return Err(CoreError::ParseError(
+            "receipt couple data contains non-ASCII bytes".into(),
+        ));
+    }
     let text = std::str::from_utf8(data)
         .map_err(|_| CoreError::ParseError("receipt couple data is not valid UTF-8".into()))?;
 
@@ -356,6 +377,13 @@ fn skip_counted_primitives(data: &[u8], count: usize) -> Result<(Vec<u8>, usize)
         )));
     }
 
+    // CESR is Base64-encoded, so all valid data must be ASCII.
+    // Reject non-ASCII to prevent panics from byte-indexing multi-byte UTF-8.
+    if !data.is_ascii() {
+        return Err(CoreError::ParseError(
+            "primitive data contains non-ASCII bytes".into(),
+        ));
+    }
     let text = std::str::from_utf8(data)
         .map_err(|_| CoreError::ParseError("data is not valid UTF-8".into()))?;
 
@@ -546,5 +574,62 @@ mod tests {
     #[test]
     fn test_parse_next_unknown_start() {
         assert!(parse_next(&[0x00]).is_err());
+    }
+
+    #[test]
+    fn test_non_ascii_attachment_returns_error() {
+        // Build a valid JSON event body, then append a counter + non-ASCII bytes.
+        // This reproduces the PoC: a -D counter followed by multi-byte UTF-8.
+        let mut sad = serde_json::json!({
+            "v": "KERI10JSON000000_",
+            "t": "icp",
+            "d": "",
+            "i": "",
+            "s": "0",
+            "kt": "1",
+            "k": ["DKey"],
+            "nt": "1",
+            "n": ["EDigest"],
+            "bt": "0",
+            "b": [],
+            "c": [],
+            "a": []
+        });
+        crate::said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
+        let serder = Serder::new(SerializationKind::Json, sad).unwrap();
+        let mut payload = serder.raw().to_vec();
+
+        // Append a -D counter (count=1) then non-ASCII bytes that would panic
+        // on byte-offset slicing without the ASCII guard.
+        // -DAAB is counter code "-D" with count 1 in qb64.
+        payload.extend_from_slice(b"-DAAB");
+        // 'é' is 0xC3 0xA9 (2-byte UTF-8) — slicing at byte 2 inside it panics.
+        payload.extend_from_slice(b"0\xc3\xa9AAAAAAAAAA");
+
+        let result = parse_next(&payload);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("non-ASCII"),
+            "expected non-ASCII error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_non_ascii_indexed_sigs_returns_error() {
+        // Directly test parse_indexed_sigs with non-ASCII data
+        let data = b"A\xc3\xa9BBBBBBBBBBB";
+        let result = parse_indexed_sigs(data, 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-ASCII"));
+    }
+
+    #[test]
+    fn test_non_ascii_skip_primitives_returns_error() {
+        // Directly test skip_counted_primitives with non-ASCII data
+        let data = b"0\xc3\xa9AAAAAAAAAA";
+        let result = skip_counted_primitives(data, 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("non-ASCII"));
     }
 }
