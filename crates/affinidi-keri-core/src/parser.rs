@@ -4,10 +4,11 @@
 //! extracting events and their attached signatures grouped by CESR
 //! counter codes.
 
-use affinidi_cesr::tables::{counter_sizage, hardage, indexer_sizage};
+use affinidi_cesr::tables::{hardage, indexer_sizage};
 use affinidi_cesr::{Counter, Indexer};
 use affinidi_keri_crypto::Siger;
 
+use crate::counter_table::{CounterTable, GroupKind};
 use crate::error::CoreError;
 use crate::serder::Serder;
 
@@ -21,6 +22,24 @@ const MIN_PRIMITIVE_SIZE: usize = 4;
 /// A receipt couple: (prefix qb64, signature raw bytes).
 type ReceiptCouple = (String, Vec<u8>);
 
+/// A transferable indexed signature group: a signature made by a transferable
+/// identifier, carried with the point in that identifier's KEL that authorises
+/// it.
+///
+/// This is how a `did:webs` designated-aliases ACDC is signed by the AID that
+/// issued it, so it is what an `alsoKnownAs` list has to be verified against.
+#[derive(Debug, Clone)]
+pub struct TransIdxSigGroup {
+    /// The signing identifier's prefix, qb64.
+    pub prefix: String,
+    /// The sequence number of the establishment event, qb64.
+    pub sn: String,
+    /// The SAID of the establishment event, qb64.
+    pub said: String,
+    /// The indexed signatures made under that key state.
+    pub sigs: Vec<Siger>,
+}
+
 /// A parsed message consisting of a serialized event and its attachments.
 #[derive(Debug)]
 pub struct ParsedMessage {
@@ -31,16 +50,99 @@ pub struct ParsedMessage {
 }
 
 /// An attachment group parsed from the CESR stream following a message body.
+///
+/// Counter codes are interpreted against the message's [`CounterTable`]; see
+/// that type for why the same code means different things in KERI 1.x and 2.x.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Attachment {
-    /// Controller indexed signatures (counter code `-B`).
+    /// Controller indexed signatures.
     ControllerSigs(Vec<Siger>),
-    /// Witness indexed signatures (counter code `-C`).
+    /// Witness indexed signatures.
     WitnessSigs(Vec<Siger>),
-    /// Receipt couples (prefix qb64, signature raw bytes) (counter code `-D`).
-    ReceiptCouples(Vec<(String, Vec<u8>)>),
-    /// Raw unparsed attachment bytes for unrecognized counter codes.
-    Raw(Vec<u8>),
+    /// Non-transferable receipt couples: (witness prefix qb64, signature raw).
+    ReceiptCouples(Vec<ReceiptCouple>),
+    /// First seen replay couples, kept as qb64: (sequence number, datetime).
+    FirstSeenReplayCouples(Vec<(String, String)>),
+    /// Seal source couples, kept as qb64: (sequence number, event SAID).
+    ///
+    /// This is the delegator anchor attached to a delegated event.
+    SealSourceCouples(Vec<(String, String)>),
+    /// Transferable indexed signature groups.
+    TransIdxSigGroups(Vec<TransIdxSigGroup>),
+    /// A group whose counter code this parser does not interpret.
+    ///
+    /// Only produced by [`parse_all_lenient`]; strict parsing rejects the
+    /// stream instead. `raw` holds *every remaining attachment byte*, not just
+    /// this group: an uninterpreted counter's length cannot be derived, so
+    /// nothing after it can be located either.
+    Unknown {
+        /// The counter code, e.g. `"-F"`.
+        code: String,
+        /// The counter's count field, whose unit depends on the group.
+        count: usize,
+        /// The remaining attachment bytes, starting after the counter.
+        raw: Vec<u8>,
+    },
+}
+
+impl ParsedMessage {
+    /// The controller signatures attached to this message, if any.
+    pub fn controller_sigs(&self) -> &[Siger] {
+        self.attachments
+            .iter()
+            .find_map(|a| match a {
+                Attachment::ControllerSigs(sigs) => Some(sigs.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[])
+    }
+
+    /// The witness signatures attached to this message, if any.
+    pub fn witness_sigs(&self) -> &[Siger] {
+        self.attachments
+            .iter()
+            .find_map(|a| match a {
+                Attachment::WitnessSigs(sigs) => Some(sigs.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[])
+    }
+
+    /// The seal source couples attached to this message, if any.
+    ///
+    /// A delegated event carries its delegator anchor here.
+    pub fn seal_source_couples(&self) -> &[(String, String)] {
+        self.attachments
+            .iter()
+            .find_map(|a| match a {
+                Attachment::SealSourceCouples(couples) => Some(couples.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[])
+    }
+
+    /// The transferable indexed signature groups attached to this message.
+    pub fn trans_idx_sig_groups(&self) -> &[TransIdxSigGroup] {
+        self.attachments
+            .iter()
+            .find_map(|a| match a {
+                Attachment::TransIdxSigGroups(groups) => Some(groups.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[])
+    }
+
+    /// Whether any attachment group could not be interpreted.
+    ///
+    /// Verification paths must refuse a message where this is true: an
+    /// uninterpreted group may be carrying the signatures or receipts that
+    /// were supposed to be checked.
+    pub fn has_uninterpreted_attachments(&self) -> bool {
+        self.attachments
+            .iter()
+            .any(|a| matches!(a, Attachment::Unknown { .. }))
+    }
 }
 
 /// Parse the next message from a byte stream.
@@ -50,6 +152,23 @@ pub enum Attachment {
 /// # Errors
 /// Returns `CoreError::ParseError` if the stream cannot be parsed.
 pub fn parse_next(stream: &[u8]) -> Result<(ParsedMessage, usize), CoreError> {
+    parse_next_inner(stream, true)
+}
+
+/// Like [`parse_next`], but records an uninterpretable attachment group as
+/// [`Attachment::Unknown`] instead of failing.
+///
+/// Use only for inspection. Anything that verifies signatures must use the
+/// strict form, or at minimum reject a message where
+/// [`ParsedMessage::has_uninterpreted_attachments`] is true.
+///
+/// # Errors
+/// Returns `CoreError::ParseError` if the message body cannot be parsed.
+pub fn parse_next_lenient(stream: &[u8]) -> Result<(ParsedMessage, usize), CoreError> {
+    parse_next_inner(stream, false)
+}
+
+fn parse_next_inner(stream: &[u8], strict: bool) -> Result<(ParsedMessage, usize), CoreError> {
     if stream.is_empty() {
         return Err(CoreError::ParseError("empty stream".into()));
     }
@@ -58,7 +177,7 @@ pub fn parse_next(stream: &[u8]) -> Result<(ParsedMessage, usize), CoreError> {
     // or a CESR-native text stream.
     let first = stream[0];
     if first == b'{' || is_cbor_start(first) || is_msgpack_start(first) {
-        parse_next_sad(stream)
+        parse_next_sad(stream, strict)
     } else {
         Err(CoreError::ParseError(format!(
             "unrecognized stream start byte: 0x{first:02x}"
@@ -71,6 +190,19 @@ pub fn parse_next(stream: &[u8]) -> Result<(ParsedMessage, usize), CoreError> {
 /// # Errors
 /// Returns `CoreError::ParseError` if any message cannot be parsed.
 pub fn parse_all(stream: &[u8]) -> Result<Vec<ParsedMessage>, CoreError> {
+    parse_all_inner(stream, true)
+}
+
+/// Like [`parse_all`], but records uninterpretable attachment groups as
+/// [`Attachment::Unknown`] instead of failing. See [`parse_next_lenient`].
+///
+/// # Errors
+/// Returns `CoreError::ParseError` if a message body cannot be parsed.
+pub fn parse_all_lenient(stream: &[u8]) -> Result<Vec<ParsedMessage>, CoreError> {
+    parse_all_inner(stream, false)
+}
+
+fn parse_all_inner(stream: &[u8], strict: bool) -> Result<Vec<ParsedMessage>, CoreError> {
     let mut messages = Vec::new();
     let mut offset = 0;
 
@@ -83,7 +215,7 @@ pub fn parse_all(stream: &[u8]) -> Result<Vec<ParsedMessage>, CoreError> {
             break;
         }
 
-        let (msg, consumed) = parse_next(&stream[offset..])?;
+        let (msg, consumed) = parse_next_inner(&stream[offset..], strict)?;
         if consumed == 0 {
             return Err(CoreError::ParseError(
                 "parse_next consumed zero bytes".into(),
@@ -97,13 +229,23 @@ pub fn parse_all(stream: &[u8]) -> Result<Vec<ParsedMessage>, CoreError> {
 }
 
 /// Parse a SAD-based message (JSON/CBOR/MGPK) followed by CESR attachments.
-fn parse_next_sad(stream: &[u8]) -> Result<(ParsedMessage, usize), CoreError> {
+fn parse_next_sad(stream: &[u8], strict: bool) -> Result<(ParsedMessage, usize), CoreError> {
     let serder = Serder::from_raw(stream)?;
     let msg_size = serder.size();
 
+    // The counter table is chosen by the protocol version in the message's own
+    // version string, never guessed: reading a 1.x stream against the 2.x
+    // table turns controller signatures into an uninterpreted group.
+    let table = serder
+        .version
+        .as_ref()
+        .map_or(CounterTable::default(), |v| {
+            CounterTable::from_major(v.major)
+        });
+
     // Parse attachments after the message body
     let rest = &stream[msg_size..];
-    let (attachments, att_consumed) = parse_attachments(rest)?;
+    let (attachments, att_consumed) = parse_attachments(rest, table, strict)?;
 
     let total_consumed = msg_size + att_consumed;
     Ok((
@@ -117,8 +259,19 @@ fn parse_next_sad(stream: &[u8]) -> Result<(ParsedMessage, usize), CoreError> {
 
 /// Parse CESR attachment groups from the stream following a message body.
 ///
+/// `table` decides what each counter code means; see [`CounterTable`].
+///
+/// In strict mode a counter code this parser does not model is an error. In
+/// lenient mode it is recorded as [`Attachment::Unknown`] and parsing stops,
+/// because a group of unknown shape has unknown length — nothing after it can
+/// be located.
+///
 /// Returns the parsed attachments and the number of bytes consumed.
-fn parse_attachments(data: &[u8]) -> Result<(Vec<Attachment>, usize), CoreError> {
+fn parse_attachments(
+    data: &[u8],
+    table: CounterTable,
+    strict: bool,
+) -> Result<(Vec<Attachment>, usize), CoreError> {
     let mut attachments = Vec::new();
     let mut offset = 0;
 
@@ -149,36 +302,213 @@ fn parse_attachments(data: &[u8]) -> Result<(Vec<Attachment>, usize), CoreError>
         let code = counter.code().to_string();
         let count = counter.count();
 
-        match code.as_str() {
-            "-B" | "-0B" => {
-                // Controller indexed signatures
+        let Some(kind) = GroupKind::classify(&code, table) else {
+            if strict {
+                return Err(CoreError::ParseError(format!(
+                    "unrecognised attachment counter code {code:?} for {table:?}; \
+                     refusing to guess its length"
+                )));
+            }
+            attachments.push(Attachment::Unknown {
+                code,
+                count,
+                raw: data[offset..].to_vec(),
+            });
+            offset = data.len();
+            break;
+        };
+
+        match kind {
+            GroupKind::AttachedMaterialQuadlets => {
+                // The count is in quadlets (4-character units) of nested
+                // attachment material, not a number of primitives. Recurse
+                // into exactly that span so a wrapper cannot swallow the
+                // groups it contains.
+                let byte_len = count.checked_mul(4).ok_or_else(|| {
+                    CoreError::ParseError(format!("quadlet count {count} overflows"))
+                })?;
+                let end = offset.checked_add(byte_len).ok_or_else(|| {
+                    CoreError::ParseError("attachment group extends past usize".into())
+                })?;
+                if end > data.len() {
+                    return Err(CoreError::ParseError(format!(
+                        "attachment group of {byte_len} bytes extends past the stream \
+                         ({} bytes available)",
+                        data.len() - offset
+                    )));
+                }
+                let (inner, consumed) = parse_attachments(&data[offset..end], table, strict)?;
+                if consumed != byte_len {
+                    return Err(CoreError::ParseError(format!(
+                        "attachment group declared {byte_len} bytes but its contents \
+                         accounted for {consumed}"
+                    )));
+                }
+                attachments.extend(inner);
+                offset = end;
+            }
+            GroupKind::ControllerIdxSigs => {
                 let (sigers, consumed) = parse_indexed_sigs(&data[offset..], count)?;
                 attachments.push(Attachment::ControllerSigs(sigers));
                 offset += consumed;
             }
-            "-C" | "-0C" => {
-                // Witness indexed signatures
+            GroupKind::WitnessIdxSigs => {
                 let (sigers, consumed) = parse_indexed_sigs(&data[offset..], count)?;
                 attachments.push(Attachment::WitnessSigs(sigers));
                 offset += consumed;
             }
-            "-D" | "-0D" => {
-                // Non-transferable receipt couples (prefix + cigar)
+            GroupKind::NonTransReceiptCouples => {
                 let (couples, consumed) = parse_receipt_couples(&data[offset..], count)?;
                 attachments.push(Attachment::ReceiptCouples(couples));
                 offset += consumed;
             }
-            _ => {
-                // Unknown counter code: try to skip the counted primitives
-                // For safety, we store the remaining bytes we can identify as raw
-                let (raw, consumed) = skip_counted_primitives(&data[offset..], count)?;
-                attachments.push(Attachment::Raw(raw));
+            GroupKind::FirstSeenReplayCouples => {
+                let (couples, consumed) = parse_qb64_pairs(&data[offset..], count)?;
+                attachments.push(Attachment::FirstSeenReplayCouples(couples));
                 offset += consumed;
+            }
+            GroupKind::SealSourceCouples => {
+                let (couples, consumed) = parse_qb64_pairs(&data[offset..], count)?;
+                attachments.push(Attachment::SealSourceCouples(couples));
+                offset += consumed;
+            }
+            GroupKind::TransIdxSigGroups => {
+                let (groups, consumed) =
+                    parse_trans_idx_sig_groups(&data[offset..], count, table, strict)?;
+                attachments.push(Attachment::TransIdxSigGroups(groups));
+                offset += consumed;
+            }
+            // Modelled in the code table but not yet parsed. Treated exactly
+            // like an unrecognised code rather than skipped, because their
+            // internal shape is what determines their length.
+            GroupKind::TransReceiptQuadruples => {
+                if strict {
+                    return Err(CoreError::ParseError(format!(
+                        "attachment group {code:?} ({kind:?}) is not yet supported; \
+                         refusing to guess its length"
+                    )));
+                }
+                attachments.push(Attachment::Unknown {
+                    code,
+                    count,
+                    raw: data[offset..].to_vec(),
+                });
+                offset = data.len();
+                break;
             }
         }
     }
 
     Ok((attachments, offset))
+}
+
+/// Parse `count` transferable indexed signature groups.
+///
+/// Each group is a (prefix, sequence number, event SAID) triple followed by a
+/// nested controller-indexed-signature group.
+fn parse_trans_idx_sig_groups(
+    data: &[u8],
+    count: usize,
+    table: CounterTable,
+    strict: bool,
+) -> Result<(Vec<TransIdxSigGroup>, usize), CoreError> {
+    if count > MAX_ATTACHMENT_COUNT {
+        return Err(CoreError::ParseError(format!(
+            "transferable sig group count {count} exceeds maximum of {MAX_ATTACHMENT_COUNT}"
+        )));
+    }
+    if !data.is_ascii() {
+        return Err(CoreError::ParseError(
+            "transferable sig group data contains non-ASCII bytes".into(),
+        ));
+    }
+    let text = std::str::from_utf8(data).map_err(|_| {
+        CoreError::ParseError("transferable sig group data is not valid UTF-8".into())
+    })?;
+
+    let mut groups = Vec::with_capacity(count);
+    let mut offset = 0;
+
+    for i in 0..count {
+        let (prefix, n) = parse_matter_qb64(&text[offset..], i, "transferable sig group prefix")?;
+        offset += n;
+        let (sn, n) = parse_matter_qb64(&text[offset..], i, "transferable sig group sn")?;
+        offset += n;
+        let (said, n) = parse_matter_qb64(&text[offset..], i, "transferable sig group said")?;
+        offset += n;
+
+        // The signatures follow as their own counted group.
+        let (inner, consumed) = parse_attachments(&data[offset..], table, strict)?;
+        offset += consumed;
+
+        let mut sigs = Vec::new();
+        for att in inner {
+            match att {
+                Attachment::ControllerSigs(s) => sigs.extend(s),
+                other => {
+                    return Err(CoreError::ParseError(format!(
+                        "transferable sig group {i} contains {other:?} where indexed \
+                         signatures were expected"
+                    )));
+                }
+            }
+        }
+        if sigs.is_empty() {
+            return Err(CoreError::ParseError(format!(
+                "transferable sig group {i} carries no signatures"
+            )));
+        }
+
+        groups.push(TransIdxSigGroup {
+            prefix,
+            sn,
+            said,
+            sigs,
+        });
+    }
+
+    Ok((groups, offset))
+}
+
+/// Parse `count` pairs of fixed-size qb64 primitives, returning them as
+/// strings. Used for the couple-shaped groups (first seen replay, seal
+/// source) whose members are plain Matter primitives.
+fn parse_qb64_pairs(
+    data: &[u8],
+    count: usize,
+) -> Result<(Vec<(String, String)>, usize), CoreError> {
+    if count > MAX_ATTACHMENT_COUNT {
+        return Err(CoreError::ParseError(format!(
+            "couple count {count} exceeds maximum of {MAX_ATTACHMENT_COUNT}"
+        )));
+    }
+    if count * MIN_PRIMITIVE_SIZE * 2 > data.len() {
+        return Err(CoreError::ParseError(format!(
+            "couple count {count} requires at least {} bytes, but only {} available",
+            count * MIN_PRIMITIVE_SIZE * 2,
+            data.len()
+        )));
+    }
+    if !data.is_ascii() {
+        return Err(CoreError::ParseError(
+            "couple data contains non-ASCII bytes".into(),
+        ));
+    }
+    let text = std::str::from_utf8(data)
+        .map_err(|_| CoreError::ParseError("couple data is not valid UTF-8".into()))?;
+
+    let mut couples = Vec::with_capacity(count);
+    let mut offset = 0;
+
+    for i in 0..count {
+        let (first, first_size) = parse_matter_qb64(&text[offset..], i, "couple first member")?;
+        offset += first_size;
+        let (second, second_size) = parse_matter_qb64(&text[offset..], i, "couple second member")?;
+        offset += second_size;
+        couples.push((first, second));
+    }
+
+    Ok((couples, offset))
 }
 
 /// Parse `count` indexed signatures from the data.
@@ -359,76 +689,6 @@ fn parse_matter_qb64(text: &str, index: usize, name: &str) -> Result<(String, us
     }
 
     Ok((text[..fs].to_string(), fs))
-}
-
-/// Skip `count` primitives for unrecognized counter codes.
-/// Returns the raw bytes and count of characters consumed.
-fn skip_counted_primitives(data: &[u8], count: usize) -> Result<(Vec<u8>, usize), CoreError> {
-    if count > MAX_ATTACHMENT_COUNT {
-        return Err(CoreError::ParseError(format!(
-            "primitive count {count} exceeds maximum of {MAX_ATTACHMENT_COUNT}"
-        )));
-    }
-    if count * MIN_PRIMITIVE_SIZE > data.len() {
-        return Err(CoreError::ParseError(format!(
-            "primitive count {count} requires at least {} bytes, but only {} available",
-            count * MIN_PRIMITIVE_SIZE,
-            data.len()
-        )));
-    }
-
-    // CESR is Base64-encoded, so all valid data must be ASCII.
-    // Reject non-ASCII to prevent panics from byte-indexing multi-byte UTF-8.
-    if !data.is_ascii() {
-        return Err(CoreError::ParseError(
-            "primitive data contains non-ASCII bytes".into(),
-        ));
-    }
-    let text = std::str::from_utf8(data)
-        .map_err(|_| CoreError::ParseError("data is not valid UTF-8".into()))?;
-
-    let mut offset = 0;
-
-    for _i in 0..count {
-        if offset >= text.len() {
-            break;
-        }
-
-        let first_char = text[offset..].chars().next().unwrap_or('\0');
-        let hs = hardage(first_char).unwrap_or(1);
-
-        if offset + hs > text.len() {
-            break;
-        }
-
-        let code = &text[offset..offset + hs];
-
-        // Try indexer, then matter sizage
-        if let Some(sizage) = indexer_sizage(code) {
-            if offset + sizage.fs > text.len() {
-                break;
-            }
-            offset += sizage.fs;
-        } else if let Some(sizage) = affinidi_cesr::tables::matter_sizage(code) {
-            if sizage.fs > 0 {
-                if offset + sizage.fs > text.len() {
-                    break;
-                }
-                offset += sizage.fs;
-            } else {
-                break;
-            }
-        } else if let Some(sizage) = counter_sizage(code) {
-            if offset + sizage.fs > text.len() {
-                break;
-            }
-            offset += sizage.fs;
-        } else {
-            break;
-        }
-    }
-
-    Ok((data[..offset].to_vec(), offset))
 }
 
 /// Check if a byte is a CBOR map start.
@@ -625,10 +885,10 @@ mod tests {
     }
 
     #[test]
-    fn test_non_ascii_skip_primitives_returns_error() {
-        // Directly test skip_counted_primitives with non-ASCII data
+    fn test_non_ascii_qb64_pairs_returns_error() {
+        // Directly test parse_qb64_pairs with non-ASCII data
         let data = b"0\xc3\xa9AAAAAAAAAA";
-        let result = skip_counted_primitives(data, 1);
+        let result = parse_qb64_pairs(data, 1);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("non-ASCII"));
     }

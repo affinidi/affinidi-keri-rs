@@ -29,7 +29,16 @@ affinidi-keri = { version = "0.2.0", path = "crates/affinidi-keri" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `preserve_order` is REQUIRED, not a preference. Without it `serde_json::Map`
+# is a BTreeMap, so any round-trip through `Value` re-serializes a KERI event
+# with alphabetically sorted fields. Every SAID and every signature is computed
+# over the exact bytes of the event, so re-ordering them silently invalidates
+# both — against events we produced ourselves it is invisible, because they are
+# re-ordered consistently, and it only shows up against a real keripy stream.
+#
+# Note for consumers: cargo unifies features, so depending on these crates
+# turns `preserve_order` on for `serde_json` throughout your build.
+serde_json = { version = "1", features = ["preserve_order"] }
 ciborium = "0.2"
 rmp-serde = "1"
 indexmap = { version = "2", features = ["serde"] }

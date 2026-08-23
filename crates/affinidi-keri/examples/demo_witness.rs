@@ -233,10 +233,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Attachment::WitnessSigs(sigs) => {
-                println!("    [{i}] -C WitnessSigs: {} signature(s)", sigs.len());
+                println!("    [{i}] WitnessSigs: {} signature(s)", sigs.len());
             }
-            Attachment::Raw(raw) => {
-                println!("    [{i}] Raw: {} bytes", raw.len());
+            Attachment::FirstSeenReplayCouples(couples) => {
+                println!(
+                    "    [{i}] FirstSeenReplayCouples: {} couple(s)",
+                    couples.len()
+                );
+            }
+            Attachment::SealSourceCouples(couples) => {
+                println!("    [{i}] SealSourceCouples: {} couple(s)", couples.len());
+            }
+            Attachment::Unknown { code, count, raw } => {
+                println!(
+                    "    [{i}] uninterpreted group {code} (count {count}): {} bytes",
+                    raw.len()
+                );
+            }
+            other => {
+                println!("    [{i}] {other:?}");
             }
         }
     }
