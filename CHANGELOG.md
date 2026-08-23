@@ -6,6 +6,66 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-23
+
+Delegation is now verified. Building the tests for it surfaced two further
+places where the library was self-consistent but disagreed with keripy, both
+of which would have rejected every real rotation.
+
+### Added
+
+- **Delegation verification.** `dip` and `drt` events were previously typed but
+  never processed: the `di` field naming a delegator is a string the delegated
+  identifier writes about itself, and nothing checked it. A delegated event is
+  now only accepted if the delegator's own **verified** KEL anchors an event
+  seal naming that exact event — its prefix, sequence number and SAID.
+  - New `delegation` module: `DelegationProof` (which of the delegator's events
+    is claimed to authorise this one, from the seal source couple attached to
+    the event), the `DelegatorAnchors` lookup trait, and `verify_delegation`.
+  - `Kever::new_delegated` and `Kever::verify_update_delegated`.
+  - `KeyState::from_delegated_inception` and `KeyState::apply_delegated_rotation`.
+  - `KeyState::delegator` records who the identifier was incepted under, so a
+    later `drt` naming a different delegator is refused rather than treated as
+    an ordinary rotation.
+
+  A `Kever` tracks one identifier and cannot fetch, let alone verify, another
+  one's KEL, so the delegator lookup is supplied by the caller through
+  `DelegatorAnchors`. That trait's contract is the security boundary: an
+  implementation that returns anchors from an *unverified* KEL makes the whole
+  check meaningless while appearing to work. It is documented as such.
+
+### Fixed
+
+- **Rotation signatures were verified against the wrong key set.** A rotation
+  is signed by the keys it *installs* — the ones the previous event committed
+  to by digest — and possession of those keys is the entire proof of authority
+  to rotate. `rot`/`drt` are now verified against the event's own `k` and `kt`;
+  `ixn`, which changes no keys, still verifies against the current key state.
+  keripy passes `verfers=serder.verfers` for rotations and `verfers=self.verfers`
+  for interactions; we passed the current state's keys for both, so we rejected
+  every rotation the ecosystem produces and accepted ones it rejects.
+  `Hab::rotate` signed with the outgoing keys to match, and now signs with the
+  incoming ones.
+- **Next-key commitments digested the wrong bytes.** The pre-rotation
+  commitment is a digest of the next key's **qb64** form
+  (`Diger(ser=signer.verfer.qb64b)` in keripy); we digested the raw key bytes.
+  Self-consistent, and therefore invisible, until checked against a commitment
+  we had not produced ourselves.
+- A delegated identifier is no longer allowed to rotate with a plain `rot`,
+  which would let it move out from under its delegator. keripy raises on the
+  same condition.
+- `Kever::new` and the three update paths now name the delegated entry point
+  when handed a `dip` or `drt`, instead of a generic "unexpected ilk".
+
+### Changed
+
+- **Breaking:** `KeyState` gains a `delegator` field and is now
+  `#[non_exhaustive]`. Construct it with `KeyState::new` or a `from_*`
+  constructor.
+- **Breaking:** rotation events signed by the outgoing key set are no longer
+  accepted, and next-key commitments are computed over the qb64 key form. KELs
+  produced by 0.2.0 that contain a rotation will not verify under 0.3.0.
+
 ## [0.2.0] - 2026-08-23
 
 ### Fixed
