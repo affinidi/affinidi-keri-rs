@@ -122,7 +122,8 @@ impl Hab {
         let next_key_digests: Vec<String> = next_signers
             .iter()
             .map(|s| {
-                let diger = Diger::from_data("E", s.verfer().raw())?;
+                // Commit to the qb64 form of the next key, matching keripy.
+                let diger = Diger::from_data("E", s.verfer().qb64()?.as_bytes())?;
                 diger.qb64().map_err(KeriError::Crypto)
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -257,7 +258,8 @@ impl Hab {
         let next_key_digests: Vec<String> = new_next_signers
             .iter()
             .map(|s| {
-                let diger = Diger::from_data("E", s.verfer().raw())?;
+                // Commit to the qb64 form of the next key, matching keripy.
+                let diger = Diger::from_data("E", s.verfer().qb64()?.as_bytes())?;
                 diger.qb64().map_err(KeriError::Crypto)
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -290,9 +292,13 @@ impl Hab {
         // Create Serder
         let serder = Serder::new(SerializationKind::Json, sad)?;
 
-        // Sign with CURRENT signers (before replacing)
+        // Sign with the NEW signers — the ones this rotation installs, which
+        // the previous event committed to by digest. A rotation signed by the
+        // outgoing keys is not what KERI defines and is not what keripy
+        // accepts: possession of the pre-rotated keys is the whole proof of
+        // authority to rotate.
         let mut sig_bytes = Vec::new();
-        for (i, signer) in self.signers.iter().enumerate() {
+        for (i, signer) in new_signers.iter().enumerate() {
             let siger = signer.sign_indexed(serder.raw(), i, true)?;
             let qb64 = siger.qb64()?;
             sig_bytes.extend_from_slice(qb64.as_bytes());
@@ -300,7 +306,7 @@ impl Hab {
 
         // Build counter
         let code = counter_code_for(&serder, GroupKind::ControllerIdxSigs)?;
-        let counter = Counter::new(code, self.signers.len())?;
+        let counter = Counter::new(code, new_signers.len())?;
         let counter_qb64 = counter.qb64()?;
 
         // Compose message

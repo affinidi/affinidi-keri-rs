@@ -1,5 +1,6 @@
 pub mod composer;
 pub mod counter_table;
+pub mod delegation;
 pub mod error;
 pub mod escrow;
 pub mod event;
@@ -14,4 +15,5 @@ pub mod threshold;
 pub mod version;
 
 pub use counter_table::{CounterTable, GroupKind};
+pub use delegation::{DelegationProof, DelegatorAnchors};
 pub use error::CoreError;

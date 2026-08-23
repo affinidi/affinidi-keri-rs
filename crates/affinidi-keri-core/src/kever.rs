@@ -6,8 +6,12 @@
 
 use affinidi_keri_crypto::{Diger, Siger, Verfer};
 
+use crate::delegation::{self, DelegationProof, DelegatorAnchors};
 use crate::error::CoreError;
-use crate::event::{InceptionEvent, InteractionEvent, RotationEvent};
+use crate::event::{
+    DelegatedInceptionEvent, DelegatedRotationEvent, InceptionEvent, InteractionEvent,
+    RotationEvent,
+};
 use crate::key_state::KeyState;
 use crate::said;
 use crate::serder::Serder;
@@ -38,6 +42,13 @@ impl Kever {
     /// Returns `CoreError` if the inception event is invalid.
     pub fn new(serder: &Serder, sigs: &[Siger], verfers: &[Verfer]) -> Result<Self, CoreError> {
         let ilk = serder.ilk()?;
+        if ilk == "dip" {
+            return Err(CoreError::UnexpectedIlk(
+                "'dip' is a delegated inception; use Kever::new_delegated, which verifies \
+                 the delegator's anchoring seal"
+                    .into(),
+            ));
+        }
         if ilk != "icp" {
             return Err(CoreError::UnexpectedIlk(format!(
                 "expected 'icp', got '{ilk}'"
@@ -77,6 +88,79 @@ impl Kever {
 
         // Derive initial key state
         let state = KeyState::from_inception(&icp)?;
+
+        Ok(Self {
+            state,
+            incepted: true,
+        })
+    }
+
+    /// Create a new Kever from a **delegated** inception event (`dip`).
+    ///
+    /// Everything `new` checks is checked here too, plus the part that makes
+    /// delegation mean anything: the delegator named in `di` must have a
+    /// verified event, at the location given by `proof`, anchoring a seal for
+    /// this exact event. `proof` comes from the seal source couple attached to
+    /// the event in the CESR stream — see
+    /// [`DelegationProof::from_seal_source_couple`].
+    ///
+    /// Without that check a `dip` proves nothing: the `di` field is just a
+    /// string the delegated identifier wrote about itself.
+    ///
+    /// # Errors
+    /// Returns `CoreError` if the event is invalid, its signatures do not meet
+    /// the threshold, or the delegation is not anchored by the delegator.
+    pub fn new_delegated(
+        serder: &Serder,
+        sigs: &[Siger],
+        verfers: &[Verfer],
+        proof: &DelegationProof,
+        source: &dyn DelegatorAnchors,
+    ) -> Result<Self, CoreError> {
+        let ilk = serder.ilk()?;
+        if ilk != "dip" {
+            return Err(CoreError::UnexpectedIlk(format!(
+                "expected 'dip', got '{ilk}'"
+            )));
+        }
+
+        // Verify SAID integrity before trusting any event fields
+        serder.verify_said("E")?;
+
+        let dip: DelegatedInceptionEvent =
+            serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+
+        if dip.keys.len() != verfers.len() {
+            return Err(CoreError::Validation(format!(
+                "key count mismatch: event has {} keys, {} verfers provided",
+                dip.keys.len(),
+                verfers.len()
+            )));
+        }
+
+        for (i, (key_qb64, verfer)) in dip.keys.iter().zip(verfers.iter()).enumerate() {
+            let verfer_qb64 = verfer.qb64().map_err(CoreError::Crypto)?;
+            if *key_qb64 != verfer_qb64 {
+                return Err(CoreError::Validation(format!(
+                    "key[{i}] mismatch: event key '{key_qb64}' != verfer '{verfer_qb64}'"
+                )));
+            }
+        }
+
+        Self::verify_sigs_static(serder.raw(), sigs, verfers, &dip.keys_threshold.0)?;
+
+        // A delegated identifier is always self-addressing: its prefix is the
+        // SAID of the very event the delegator anchors, which is what binds
+        // the two together.
+        if dip.prefix != dip.said {
+            return Err(CoreError::InvalidPrefix(
+                "delegated inception prefix does not match event SAID (i != d)".into(),
+            ));
+        }
+
+        delegation::verify_delegation(&dip.prefix, 0, &dip.said, &dip.delegator, proof, source)?;
+
+        let state = KeyState::from_delegated_inception(&dip)?;
 
         Ok(Self {
             state,
@@ -170,22 +254,35 @@ impl Kever {
             });
         }
 
-        // Build verfers from current keys for signature verification
-        let verfers = self.build_verfers()?;
-
-        // Verify signatures against current keys
-        Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
-
         match ilk.as_str() {
             "rot" => {
+                self.reject_plain_rotation_when_delegated()?;
                 let rot: RotationEvent =
                     serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+                // A rotation is signed by the keys it INSTALLS, not the ones it
+                // replaces: authority comes from the prior event's pre-rotation
+                // commitment, proven by those keys signing here. Verifying
+                // against the outgoing key set instead both accepts events
+                // keripy rejects and rejects the ones it produces.
+                let verfers = Self::verfers_from_keys(&rot.keys)?;
+                Self::verify_sigs_static(serder.raw(), sigs, &verfers, &rot.keys_threshold.0)?;
                 self.state = self.state.apply_rotation(&rot)?;
             }
             "ixn" => {
+                // An interaction changes no keys, so it is signed by the
+                // current key set under the current threshold.
+                let verfers = self.build_verfers()?;
+                Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
                 let ixn: InteractionEvent =
                     serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
                 self.state = self.state.apply_interaction(&ixn)?;
+            }
+            "drt" => {
+                return Err(CoreError::UnexpectedIlk(
+                    "'drt' is a delegated rotation; use Kever::verify_update_delegated, \
+                     which verifies the delegator's anchoring seal"
+                        .into(),
+                ));
             }
             _ => {
                 return Err(CoreError::UnexpectedIlk(format!(
@@ -223,19 +320,29 @@ impl Kever {
             });
         }
 
-        let verfers = self.build_verfers()?;
-        Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
-
         let new_state = match ilk.as_str() {
             "rot" => {
+                self.reject_plain_rotation_when_delegated()?;
                 let rot: RotationEvent =
                     serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+                // Signed by the keys it installs — see `update`.
+                let verfers = Self::verfers_from_keys(&rot.keys)?;
+                Self::verify_sigs_static(serder.raw(), sigs, &verfers, &rot.keys_threshold.0)?;
                 self.state.apply_rotation(&rot)?
             }
             "ixn" => {
+                let verfers = self.build_verfers()?;
+                Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
                 let ixn: InteractionEvent =
                     serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
                 self.state.apply_interaction(&ixn)?
+            }
+            "drt" => {
+                return Err(CoreError::UnexpectedIlk(
+                    "'drt' is a delegated rotation; use Kever::verify_update_delegated, \
+                     which verifies the delegator's anchoring seal"
+                        .into(),
+                ));
             }
             _ => {
                 return Err(CoreError::UnexpectedIlk(format!(
@@ -286,17 +393,27 @@ impl Kever {
             });
         }
 
-        let verfers = self.build_verfers()?;
-        Self::verify_sigs_static(raw, sigs, &verfers, &self.state.threshold)?;
-
         let new_state = match ilk.as_str() {
             "rot" => {
+                self.reject_plain_rotation_when_delegated()?;
                 let rot: RotationEvent = serde_json::from_value(sad).map_err(CoreError::Json)?;
+                // Signed by the keys it installs — see `update`.
+                let verfers = Self::verfers_from_keys(&rot.keys)?;
+                Self::verify_sigs_static(raw, sigs, &verfers, &rot.keys_threshold.0)?;
                 self.state.apply_rotation(&rot)?
             }
             "ixn" => {
+                let verfers = self.build_verfers()?;
+                Self::verify_sigs_static(raw, sigs, &verfers, &self.state.threshold)?;
                 let ixn: InteractionEvent = serde_json::from_value(sad).map_err(CoreError::Json)?;
                 self.state.apply_interaction(&ixn)?
+            }
+            "drt" => {
+                return Err(CoreError::UnexpectedIlk(
+                    "'drt' is a delegated rotation; use Kever::verify_update_delegated, \
+                     which verifies the delegator's anchoring seal"
+                        .into(),
+                ));
             }
             _ => {
                 return Err(CoreError::UnexpectedIlk(format!(
@@ -306,6 +423,63 @@ impl Kever {
         };
 
         Ok(new_state)
+    }
+
+    /// Verify a **delegated** rotation (`drt`) against the current state.
+    ///
+    /// Checks everything `verify_update` checks for a rotation — sequence
+    /// ordering, prior-event digest, signatures against the current key set,
+    /// the pre-rotation commitment — and additionally that the delegator named
+    /// in `di` anchored this exact event, and is the same delegator the
+    /// identifier was incepted under.
+    ///
+    /// Returns the proposed state; commit it with
+    /// [`apply_verified_update`](Self::apply_verified_update).
+    ///
+    /// # Errors
+    /// Returns `CoreError` if the rotation is invalid or the delegation is not
+    /// anchored by the delegator.
+    pub fn verify_update_delegated(
+        &self,
+        serder: &Serder,
+        sigs: &[Siger],
+        proof: &DelegationProof,
+        source: &dyn DelegatorAnchors,
+    ) -> Result<KeyState, CoreError> {
+        if !self.incepted {
+            return Err(CoreError::Validation(
+                "kever not initialized with inception event".into(),
+            ));
+        }
+
+        // Verify SAID integrity before trusting any event fields
+        serder.verify_said("E")?;
+
+        let ilk = serder.ilk()?;
+        if ilk != "drt" {
+            return Err(CoreError::UnexpectedIlk(format!(
+                "expected 'drt', got '{ilk}'"
+            )));
+        }
+
+        let sn = serder.sn()?;
+        if sn != self.state.sn + 1 {
+            return Err(CoreError::OutOfOrder {
+                expected: self.state.sn + 1,
+                got: sn,
+            });
+        }
+
+        let drt: DelegatedRotationEvent =
+            serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+
+        // Like a plain rotation, signed by the keys it installs.
+        let verfers = Self::verfers_from_keys(&drt.keys)?;
+        Self::verify_sigs_static(serder.raw(), sigs, &verfers, &drt.keys_threshold.0)?;
+
+        delegation::verify_delegation(&drt.prefix, sn, &drt.said, &drt.delegator, proof, source)?;
+
+        self.state.apply_delegated_rotation(&drt)
     }
 
     /// Apply a previously verified update (from [`verify_update`]).
@@ -400,6 +574,29 @@ impl Kever {
             )));
         }
 
+        Ok(())
+    }
+
+    /// Build Verfer instances from a list of qb64 keys.
+    fn verfers_from_keys(keys: &[String]) -> Result<Vec<Verfer>, CoreError> {
+        let mut verfers = Vec::with_capacity(keys.len());
+        for key_qb64 in keys {
+            verfers.push(Verfer::from_qb64(key_qb64).map_err(CoreError::Crypto)?);
+        }
+        Ok(verfers)
+    }
+
+    /// Reject a plain rotation on a delegated identifier.
+    ///
+    /// A delegated identifier rotates with `drt`, which carries the
+    /// delegator's authorisation. Accepting a bare `rot` would let it rotate
+    /// out from under its delegator.
+    fn reject_plain_rotation_when_delegated(&self) -> Result<(), CoreError> {
+        if self.state.delegated {
+            return Err(CoreError::UnexpectedIlk(
+                "identifier is delegated and must rotate with 'drt', not 'rot'".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -513,7 +710,7 @@ mod tests {
 
     /// Compute the next-key digest for a signer (Blake3-256 of raw public key).
     fn next_key_digest(signer: &Signer) -> String {
-        Diger::from_data("E", signer.verfer().raw())
+        Diger::from_data("E", signer.verfer().qb64().unwrap().as_bytes())
             .unwrap()
             .qb64()
             .unwrap()
@@ -683,8 +880,9 @@ mod tests {
         // Rotation to signer2, committing to signer3 for next rotation
         let rot_serder = build_rotation_serder(&prefix, 1, &prior_said, &[&signer2], &[&signer3]);
 
-        // Sign rotation with CURRENT keys (signer1)
-        let rot_sig = signer1.sign_indexed(rot_serder.raw(), 0, true).unwrap();
+        // Sign the rotation with the keys it INSTALLS (signer2), which the
+        // inception committed to by digest — not with the outgoing key.
+        let rot_sig = signer2.sign_indexed(rot_serder.raw(), 0, true).unwrap();
         kever.update(&rot_serder, &[rot_sig]).unwrap();
 
         assert_eq!(kever.sn(), 1);

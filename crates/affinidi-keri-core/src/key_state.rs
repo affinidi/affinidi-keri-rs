@@ -6,14 +6,23 @@
 use affinidi_keri_crypto::{Diger, Verfer};
 
 use crate::error::CoreError;
-use crate::event::{InceptionEvent, InteractionEvent, RotationEvent};
+use crate::event::{
+    DelegatedInceptionEvent, DelegatedRotationEvent, InceptionEvent, InteractionEvent,
+    RotationEvent,
+};
 use crate::threshold::Threshold;
 
 /// The current key state of a KERI identifier.
 ///
 /// This is the computed result of processing a key event log (KEL)
 /// up to and including a specific establishment event.
+///
+/// `#[non_exhaustive]`: this is a *returned* type — callers read it rather than
+/// construct it — so sealing it costs nothing and lets key state carry more
+/// about an identifier later without a breaking release. Build one with
+/// [`KeyState::new`] or one of the `from_*` constructors.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct KeyState {
     /// The identifier prefix (qb64-encoded).
     pub prefix: String,
@@ -39,6 +48,12 @@ pub struct KeyState {
     pub last_event_digest: String,
     /// Whether this identifier is delegated.
     pub delegated: bool,
+    /// The delegator's prefix, for a delegated identifier.
+    ///
+    /// Retained so a later delegated rotation can be checked against the same
+    /// delegator the identifier was incepted under — a `drt` naming a
+    /// different delegator is an attempt to move control, not a rotation.
+    pub delegator: Option<String>,
 }
 
 impl KeyState {
@@ -57,6 +72,7 @@ impl KeyState {
             config: Vec::new(),
             last_event_digest: String::new(),
             delegated: false,
+            delegator: None,
         }
     }
 
@@ -98,6 +114,54 @@ impl KeyState {
             config: event.config.clone(),
             last_event_digest: event.said.clone(),
             delegated: false,
+            delegator: None,
+        })
+    }
+
+    /// Derive the initial key state from a delegated inception event.
+    ///
+    /// The delegator's authorisation is **not** checked here — that needs the
+    /// delegator's KEL, which this type has no access to. Callers must go
+    /// through `Kever::new_delegated`, which verifies the anchoring seal
+    /// before this is reached.
+    ///
+    /// # Errors
+    /// Returns `CoreError` if the event is not a well-formed inception.
+    pub fn from_delegated_inception(event: &DelegatedInceptionEvent) -> Result<Self, CoreError> {
+        let sn = parse_sn(&event.sn)?;
+        if sn != 0 {
+            return Err(CoreError::Validation(format!(
+                "delegated inception event must have sn=0, got {sn}"
+            )));
+        }
+        if event.delegator.is_empty() {
+            return Err(CoreError::Validation(
+                "delegated inception names no delegator (empty `di`)".into(),
+            ));
+        }
+
+        let backer_threshold = parse_backer_threshold(&event.backer_threshold)?;
+        if backer_threshold > event.backers.len() {
+            return Err(CoreError::Validation(format!(
+                "backer threshold ({backer_threshold}) exceeds backer count ({})",
+                event.backers.len()
+            )));
+        }
+
+        Ok(Self {
+            prefix: event.prefix.clone(),
+            sn: 0,
+            said: event.said.clone(),
+            threshold: event.keys_threshold.0.clone(),
+            keys: event.keys.clone(),
+            next_keys: event.next_keys.clone(),
+            next_threshold: event.next_threshold.0.clone(),
+            backer_threshold,
+            backers: event.backers.clone(),
+            config: event.config.clone(),
+            last_event_digest: event.said.clone(),
+            delegated: true,
+            delegator: Some(event.delegator.clone()),
         })
     }
 
@@ -169,7 +233,65 @@ impl KeyState {
             config: event.config.clone(),
             last_event_digest: event.said.clone(),
             delegated: self.delegated,
+            delegator: self.delegator.clone(),
         })
+    }
+
+    /// Apply a delegated rotation event to produce a new key state.
+    ///
+    /// As with `from_delegated_inception`, the delegator's authorisation is
+    /// verified by `Kever::verify_update_delegated`, not here.
+    ///
+    /// # Errors
+    /// Returns `CoreError` if the rotation is invalid relative to the current
+    /// state, or names a different delegator than the identifier was incepted
+    /// under.
+    pub fn apply_delegated_rotation(
+        &self,
+        event: &DelegatedRotationEvent,
+    ) -> Result<Self, CoreError> {
+        if !self.delegated {
+            return Err(CoreError::Validation(
+                "delegated rotation applied to an identifier that was not delegated".into(),
+            ));
+        }
+        match self.delegator.as_deref() {
+            Some(known) if known == event.delegator => {}
+            Some(known) => {
+                return Err(CoreError::Validation(format!(
+                    "delegated rotation names delegator '{}' but the identifier was \
+                     incepted under '{known}'",
+                    event.delegator,
+                )));
+            }
+            None => {
+                return Err(CoreError::Validation(
+                    "delegated identifier has no recorded delegator".into(),
+                ));
+            }
+        }
+
+        // The delegation-specific checks above are the only difference; the
+        // rest of a `drt` is a `rot` and must satisfy exactly the same rules,
+        // including the pre-rotation commitment.
+        let as_rotation = RotationEvent {
+            version: event.version.clone(),
+            ilk: event.ilk.clone(),
+            said: event.said.clone(),
+            prefix: event.prefix.clone(),
+            sn: event.sn.clone(),
+            prior_said: event.prior_said.clone(),
+            keys_threshold: event.keys_threshold.clone(),
+            keys: event.keys.clone(),
+            next_threshold: event.next_threshold.clone(),
+            next_keys: event.next_keys.clone(),
+            backer_threshold: event.backer_threshold.clone(),
+            backers_remove: event.backers_remove.clone(),
+            backers_add: event.backers_add.clone(),
+            config: event.config.clone(),
+            anchors: event.anchors.clone(),
+        };
+        self.apply_rotation(&as_rotation)
     }
 
     /// Apply an interaction event to produce a new key state.
@@ -233,7 +355,12 @@ fn verify_next_key_commitment(keys: &[String], next_keys: &[String]) -> Result<(
             CoreError::Validation(format!("invalid next-key digest at index {i}: {e}"))
         })?;
 
-        let matches = diger.verify(verfer.raw()).map_err(|e| {
+        // The commitment is a digest of the key's **qb64** form, not its raw
+        // bytes: that is what keripy commits to, so digesting the raw bytes
+        // rejects every rotation produced by the rest of the ecosystem.
+        // `Verfer::from_qb64` above is what validates the key itself.
+        let _ = &verfer;
+        let matches = diger.verify(key_qb64.as_bytes()).map_err(|e| {
             CoreError::Validation(format!(
                 "failed to verify next-key commitment at index {i}: {e}"
             ))
@@ -273,7 +400,10 @@ mod tests {
         let signer = Signer::new("A", seed.to_vec()).unwrap();
         let verfer = signer.verfer();
         let key_qb64 = verfer.qb64().unwrap();
-        let digest_qb64 = Diger::from_data("E", verfer.raw()).unwrap().qb64().unwrap();
+        let digest_qb64 = Diger::from_data("E", key_qb64.as_bytes())
+            .unwrap()
+            .qb64()
+            .unwrap();
         (key_qb64, digest_qb64)
     }
 
