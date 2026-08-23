@@ -1,0 +1,100 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # `audit` only tells you something if it runs against the current advisory
+  # database. Without a schedule, an advisory published after a PR merges is
+  # never noticed, because nothing checks `main` again.
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-targets --no-fail-fast
+
+  # Every crate is published on its own, so every crate must build on its own.
+  # A workspace build unifies features across members and would hide a missing
+  # dependency in exactly the crate that is about to be published.
+  per-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          for pkg in affinidi-keri-crypto affinidi-keri-core affinidi-keri-db affinidi-keri; do
+            echo "::group::$pkg"
+            cargo build -p "$pkg"
+            echo "::endgroup::"
+          done
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check bans licenses sources
+
+  # Build the .crate tarballs so a release is not the first time we find out a
+  # crate does not package (missing README, absent license, excluded file).
+  #
+  # `--no-verify` on purpose: the verify step resolves each crate against the
+  # registry in isolation, which fails for every crate whose internal
+  # dependency version is not published yet — i.e. on every release PR. That
+  # would be a permanently red job, which is worse than no job at all. Actual
+  # dependency resolution is covered by `test` and `per-package`.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo package --workspace --no-verify --allow-dirty

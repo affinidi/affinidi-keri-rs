@@ -210,7 +210,7 @@ mod tests {
         let secret = [7u8; 32];
         let sk = SigningKey::from_slice(&secret).unwrap();
         let vk = sk.verifying_key();
-        let pubkey = vk.to_sec1_bytes().to_vec();
+        let pubkey = vk.to_sec1_point(true).as_bytes().to_vec();
 
         let message = b"test message for secp256k1";
         let sig: k256::ecdsa::Signature = sk.sign(message);
@@ -227,7 +227,7 @@ mod tests {
         let secret = [9u8; 32];
         let sk = SigningKey::from_slice(&secret).unwrap();
         let vk = sk.verifying_key();
-        let pubkey = vk.to_encoded_point(true).as_bytes().to_vec();
+        let pubkey = vk.to_sec1_point(true).as_bytes().to_vec();
 
         let message = b"test message for secp256r1";
         let sig: p256::ecdsa::Signature = sk.sign(message);

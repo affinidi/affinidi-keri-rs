@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "crates/affinidi-keri-crypto",
     "crates/affinidi-keri-core",
@@ -10,16 +10,22 @@ members = [
 [workspace.package]
 edition = "2024"
 rust-version = "1.90.0"
+authors = ["Affinidi <opensource@affinidi.com>"]
 license = "Apache-2.0"
-repository = "https://github.com/nicktho/affinidi-keri"
+homepage = "https://www.affinidi.com/"
+repository = "https://github.com/affinidi/affinidi-keri-rs"
+keywords = ["keri", "cesr", "did", "identity", "cryptography"]
+categories = ["cryptography", "authentication"]
+publish = true
 
 [workspace.dependencies]
-# Internal crates
-affinidi-cesr = "0.1.0"
-affinidi-keri-crypto = { path = "crates/affinidi-keri-crypto" }
-affinidi-keri-core = { path = "crates/affinidi-keri-core" }
-affinidi-keri-db = { path = "crates/affinidi-keri-db" }
-affinidi-keri = { path = "crates/affinidi-keri" }
+# Internal crates. Path + version so `cargo publish` resolves them from the
+# registry while local builds use the workspace copy.
+affinidi-cesr = "0.1.3"
+affinidi-keri-crypto = { version = "0.2.0", path = "crates/affinidi-keri-crypto" }
+affinidi-keri-core = { version = "0.2.0", path = "crates/affinidi-keri-core" }
+affinidi-keri-db = { version = "0.2.0", path = "crates/affinidi-keri-db" }
+affinidi-keri = { version = "0.2.0", path = "crates/affinidi-keri" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -28,26 +34,33 @@ ciborium = "0.2"
 rmp-serde = "1"
 indexmap = { version = "2", features = ["serde"] }
 
-# Crypto
-ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
-k256 = { version = "0.13", features = ["ecdsa", "sha256"] }
-p256 = { version = "0.13", features = ["ecdsa", "sha256"] }
-x25519-dalek = { version = "2", features = ["static_secrets"] }
+# Crypto. Kept in step with affinidi-tdk-rs: ed25519-dalek 3 (curve25519-dalek
+# 5), k256/p256 0.14 (elliptic-curve 0.14) and rand 0.10. Do not move these
+# back a generation — the TDK graph deliberately contains no curve25519-dalek 4
+# and no elliptic-curve 0.13, and `deny.toml` there allows multiple versions,
+# so a regression would not be caught by CI.
+ed25519-dalek = { version = "3", features = ["rand_core", "zeroize"] }
+k256 = { version = "0.14", features = ["ecdsa", "sha256"] }
+p256 = { version = "0.14", features = ["ecdsa", "sha256"] }
 blake3 = "1"
+# blake2 has no release on the 0.11 `digest` generation, so it stays on 0.10
+# while sha2/sha3 move forward. Each hash is used through its own crate's
+# re-exports (`blake2::digest::…`, `sha2::Digest`), never through a shared
+# top-level `digest` dependency, so the two generations never meet in generic
+# code. Drop this note if/when blake2 0.11 ships.
 blake2 = "0.10"
-sha2 = "0.10"
-sha3 = "0.10"
+sha2 = "0.11"
+sha3 = "0.12"
 argon2 = "0.5"
-rand = "0.8"
+rand = "0.10"
 zeroize = { version = "1", features = ["derive"] }
-digest = "0.10"
 subtle = "2"
 
 # Encoding
 base64ct = { version = "1", features = ["alloc"] }
 
 # Storage
-heed = "0.20"
+heed = "0.22"
 
 # Error handling & logging
 thiserror = "2"
@@ -59,4 +72,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # Testing
 hex = "0.4"
 tempfile = "3"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[workspace.lints.clippy]
+uninlined_format_args = "warn"

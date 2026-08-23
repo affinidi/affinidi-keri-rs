@@ -38,9 +38,9 @@ impl Salter {
 
     /// Generate a new random Salter with a 16-byte random salt.
     pub fn new_random() -> Result<Self, CryptoError> {
-        use rand::RngCore;
+        use rand::Rng;
         let mut raw = vec![0u8; 16];
-        rand::thread_rng().fill_bytes(&mut raw);
+        rand::rng().fill_bytes(&mut raw);
         Self::new(SALT_CODE, raw)
     }
 

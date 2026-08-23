@@ -1,10 +1,17 @@
 [package]
 name = "affinidi-keri"
-version = "0.1.3"
-description = "KERI identity management and direct mode protocol"
+version = "0.2.0"
+description = "KERI identity management: identifier registry, direct mode protocol and duplicity detection"
 edition.workspace = true
 rust-version.workspace = true
+authors.workspace = true
 license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+readme = "README.md"
 
 [dependencies]
 affinidi-cesr = { workspace = true }
@@ -23,3 +30,6 @@ criterion = { workspace = true }
 [[bench]]
 name = "kel_benchmarks"
 harness = false
+
+[lints]
+workspace = true

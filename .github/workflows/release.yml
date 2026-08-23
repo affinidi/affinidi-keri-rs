@@ -1,0 +1,119 @@
+name: release
+
+# Tag-driven. Tag the merge commit `v<version>` (e.g. `v0.2.0`) and push it:
+#
+#   git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0
+#
+# The tag must match the version in every crate manifest — `verify` below
+# enforces that, so a mistyped tag fails before anything is published.
+#
+# NOTE: crates.io will not accept the FIRST publish of a crate name from CI
+# when the account uses Trusted Publishing — a brand-new crate returns 403.
+# Each of these four crates must be published once by a human with
+# `cargo publish`; every release after that runs here.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Package and check only; do not publish"
+        type: boolean
+        default: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Tag matches crate versions
+        id: version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "manual run, skipping tag check"
+            exit 0
+          fi
+          fail=0
+          for pkg in affinidi-keri-crypto affinidi-keri-core affinidi-keri-db affinidi-keri; do
+            got=$(cargo metadata --no-deps --format-version 1 \
+              | python3 -c "import sys,json;print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='$pkg'))")
+            if [ "$got" != "$tag" ]; then
+              echo "::error::$pkg is $got but the tag says $tag"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --no-fail-fast
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.dry_run == false
+    environment: crates-io
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Dependency order. Each crate must be visible in the registry index
+      # before the next one can resolve it, so wait for it rather than
+      # sleeping a fixed amount and hoping.
+      - name: Publish crates in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          published() {
+            curl -sf "https://crates.io/api/v1/crates/$1/$2" \
+              -H "User-Agent: affinidi-keri-rs-release" >/dev/null 2>&1
+          }
+
+          wait_for_index() {
+            for _ in $(seq 1 60); do
+              if published "$1" "$2"; then return 0; fi
+              sleep 10
+            done
+            echo "::error::$1 $2 never appeared in the registry"
+            return 1
+          }
+
+          for pkg in affinidi-keri-crypto affinidi-keri-core affinidi-keri-db affinidi-keri; do
+            if published "$pkg" "$VERSION"; then
+              echo "$pkg $VERSION already published, skipping"
+            else
+              echo "::group::publish $pkg $VERSION"
+              cargo publish -p "$pkg"
+              echo "::endgroup::"
+            fi
+            wait_for_index "$pkg" "$VERSION"
+          done
+
+      - name: GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md)." \
+            --verify-tag

@@ -117,14 +117,14 @@ impl Diger {
     /// Blake2b-256: 32-byte digest.
     fn blake2b_256(data: &[u8]) -> Vec<u8> {
         use blake2::Digest;
-        let hash = blake2::Blake2b::<digest::consts::U32>::digest(data);
+        let hash = blake2::Blake2b::<blake2::digest::consts::U32>::digest(data);
         hash.to_vec()
     }
 
     /// Blake2b-512: 64-byte digest.
     fn blake2b_512(data: &[u8]) -> Vec<u8> {
         use blake2::Digest;
-        let hash = blake2::Blake2b::<digest::consts::U64>::digest(data);
+        let hash = blake2::Blake2b::<blake2::digest::consts::U64>::digest(data);
         hash.to_vec()
     }
 
