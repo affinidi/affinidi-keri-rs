@@ -9,7 +9,11 @@ members = [
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.90.0"
+# Set by `affinidi-cesr`, which requires 1.95.0, and matched to the toolchain
+# affinidi-tdk-rs pins. The workspace previously declared 1.90.0 while
+# depending on a crate that could not build on it — there was no CI to catch
+# the contradiction.
+rust-version = "1.95.0"
 authors = ["Affinidi <opensource@affinidi.com>"]
 license = "Apache-2.0"
 homepage = "https://www.affinidi.com/"

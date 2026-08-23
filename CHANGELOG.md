@@ -83,6 +83,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not readable by 0.2.0 and vice versa. Nothing was published under 0.1.x.
 - `repository` now points at `github.com/affinidi/affinidi-keri-rs`; it
   previously pointed at an unrelated personal repository URL.
+- **`rust-version` raised from 1.90.0 to 1.95.0.** The declared MSRV was
+  already unachievable: `affinidi-cesr 0.1.3` requires 1.95.0, so the workspace
+  could not build on 1.90.0 and there was no CI to notice. 1.95.0 is also the
+  toolchain `affinidi-tdk-rs` pins.
 - Dependencies moved to the generation `affinidi-tdk-rs` uses, so that
   consuming these crates from the TDK does not pull in a second copy of the
   curve25519 or elliptic-curve stacks: `ed25519-dalek` 2 → 3 (curve25519-dalek
