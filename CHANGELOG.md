@@ -6,6 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-23
+
+An identifier could not be resumed across a process boundary. This adds the
+missing half.
+
+### Added
+
+- **`HabState`, `Hab::state` and `Hab::resume`.** `Hab` derives every key
+  deterministically from a `Salter`, so the only secret worth protecting is the
+  salt — but the salt and the generation counter lived only in memory, and the
+  record written by `put_hab` held just `{name, prefix, transferable, code}`.
+  There was no loader. A process could hold the entire key event log and still
+  be unable to sign the next event, because pre-rotated keys are committed to by
+  digest and cannot be recovered from the log.
+
+  `HabState` carries everything needed to resume **except the salt**, so it can
+  be persisted wherever the key event log goes while the salt lives wherever the
+  application keeps secrets.
+
+  It records the key derivation generations **explicitly** rather than deriving
+  them from the counter. That is not redundancy: the relationship is not
+  uniform. After inception the current keys sit at `key_gen - 2`; after any
+  rotation at `key_gen - 3`, because `rotate` advances the counter by two and
+  leaves one index unused. Only the next keys are always at `key_gen - 1`.
+  Computing the current keys from the counter yields the right answer straight
+  after inception and the wrong one ever after — and since rotations are signed
+  by the incoming keys, the mistake would surface only on the first interaction
+  after a rotation.
+
+- **Store-free event constructors:** `Hab::incept_event`, `Hab::rotate_event`
+  and `Hab::interact_event`, returning a `SignedEvent` (said, raw body,
+  signatures, and the composed CESR bytes). For callers that keep the key event
+  log somewhere other than a `KeriStore` — a `did:webs` `keri.cesr` artifact,
+  say — and which should not have to link LMDB to build an event.
+
+  The existing `incept`, `rotate` and `interact` are unchanged, and delegate.
+
+- **`Habery::resume`**, which reads the stored state and rebuilds an identifier
+  given its salt. A `Habery` could previously only manage identifiers incepted
+  in the same process.
+
+### Changed
+
+- The record written by `put_hab` at inception is now the full `HabState`.
+  Identifiers incepted by an earlier version cannot be resumed — their stored
+  record lacks the generation indices.
+
 ## [0.3.2] - 2026-08-23
 
 ### Security
