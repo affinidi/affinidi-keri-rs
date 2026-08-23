@@ -6,18 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Security
-
-- **Dropped `bincode` from the dependency tree** (RUSTSEC-2025-0141: bincode is
-  permanently unmaintained). It was never used directly — it arrived through
-  `heed`'s default features, which turn on the serde-backed `SerdeBincode`,
-  `SerdeJson` and `Serde*` codecs. `affinidi-keri-db` hands LMDB bytes that are
-  already encoded and only ever uses the `Str` and `Bytes` codecs, so none of
-  those were reachable. `heed` is now taken with `default-features = false`,
-  which also drops `serde` and `serde_json` from heed's own graph. No API and
-  no on-disk format change: `Str` and `Bytes` are unconditional in
-  `heed-types`, and the bytes written are unchanged.
-
 ## [0.4.0] - 2026-08-23
 
 An identifier could not be resumed across a process boundary. This adds the
@@ -64,6 +52,18 @@ missing half.
 - The record written by `put_hab` at inception is now the full `HabState`.
   Identifiers incepted by an earlier version cannot be resumed — their stored
   record lacks the generation indices.
+
+### Security
+
+- **Dropped `bincode` from the dependency tree** (RUSTSEC-2025-0141: bincode is
+  permanently unmaintained). It was never used directly — it arrived through
+  `heed`'s default features, which turn on the serde-backed `SerdeBincode`,
+  `SerdeJson` and `Serde*` codecs. `affinidi-keri-db` hands LMDB bytes that are
+  already encoded and only ever uses the `Str` and `Bytes` codecs, so none of
+  those were reachable. `heed` is now taken with `default-features = false`,
+  which also drops `serde` and `serde_json` from heed's own graph. No API and
+  no on-disk format change: `Str` and `Bytes` are unconditional in
+  `heed-types`, and the bytes written are unchanged.
 
 ## [0.3.2] - 2026-08-23
 
