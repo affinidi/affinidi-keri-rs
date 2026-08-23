@@ -9,7 +9,7 @@ use affinidi_keri_db::KeriStore;
 
 use crate::config::{InceptionConfig, RotationConfig};
 use crate::error::KeriError;
-use crate::hab::Hab;
+use crate::hab::{Hab, HabState};
 
 /// Multi-identifier manager backed by a shared store.
 pub struct Habery {
@@ -37,6 +37,36 @@ impl Habery {
         let (hab, msg) = Hab::incept(name, config, self.store.as_ref())?;
         self.habs.insert(name.to_string(), hab);
         Ok(msg)
+    }
+
+    /// Resume a previously incepted identifier from the store and its salt.
+    ///
+    /// The store holds everything except the salt — see [`HabState`]. Without
+    /// this, a `Habery` could only ever manage identifiers incepted in the same
+    /// process: the key event log survives a restart, but the pre-rotated keys
+    /// are committed to by digest and cannot be recovered from it.
+    ///
+    /// Note that identifiers incepted before this state was persisted in full
+    /// cannot be resumed — their stored record lacks the generation indices.
+    ///
+    /// # Errors
+    /// Returns [`KeriError::NotFound`] if the store has no record under `name`,
+    /// or [`KeriError`] if the record is unreadable or the keys cannot be
+    /// derived.
+    pub fn resume(&mut self, name: &str, salt: &[u8]) -> Result<&Hab, KeriError> {
+        let raw = self
+            .store
+            .get_hab(name)?
+            .ok_or_else(|| KeriError::NotFound(name.to_string()))?;
+
+        let state: HabState = serde_json::from_slice(&raw).map_err(|e| {
+            KeriError::Config(format!(
+                "stored record for {name:?} is not resumable state: {e}"
+            ))
+        })?;
+
+        let hab = Hab::resume(&state, salt)?;
+        Ok(self.habs.entry(name.to_string()).or_insert(hab))
     }
 
     /// Get a reference to a Hab by name.

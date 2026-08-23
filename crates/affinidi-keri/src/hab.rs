@@ -12,6 +12,7 @@ use affinidi_keri_core::serder::Serder;
 use affinidi_keri_core::version::SerializationKind;
 use affinidi_keri_crypto::{Cigar, Diger, Salter, Signer};
 use affinidi_keri_db::KeriStore;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{InceptionConfig, RotationConfig};
 use crate::error::KeriError;
@@ -40,6 +41,17 @@ pub struct Hab {
     sn: u64,
     /// Counter tracking how many key generations have been derived.
     key_gen: usize,
+    /// Derivation path index of the current signing keys.
+    ///
+    /// Recorded rather than computed from `key_gen`, because the relationship
+    /// is not uniform: after inception the current keys are at `key_gen - 2`,
+    /// and after any rotation at `key_gen - 3`, since `rotate` advances the
+    /// counter by two and leaves one index unused. Only the *next* keys are
+    /// always at `key_gen - 1`. Deriving these from the counter is how a
+    /// resumed identifier would silently sign with the wrong keys.
+    signer_gen: usize,
+    /// Derivation path index of the pre-rotated next keys.
+    next_gen: usize,
     /// Current backer (witness) threshold.
     backer_threshold: usize,
     /// Current backer (witness) prefixes.
@@ -78,6 +90,69 @@ fn fix_version_string(sad: &mut serde_json::Value) -> Result<(), KeriError> {
     Ok(())
 }
 
+/// Everything needed to resume signing for an identifier, **except the salt**.
+///
+/// `Hab` derives its keys deterministically from a [`Salter`], so the only
+/// secret worth protecting is the salt — every key, current and pre-rotated,
+/// is reproducible from it plus the generation indices recorded here. Keeping
+/// the salt out of this type is deliberate: it can then be persisted anywhere
+/// the key event log itself could go, while the salt lives wherever the
+/// application keeps secrets.
+///
+/// Without this, an identifier could not be resumed at all. The key event log
+/// alone is not enough to sign the next event: the pre-rotated keys are
+/// committed to by digest, so they cannot be recovered from the log, and a
+/// process that lost them could never rotate again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct HabState {
+    /// Human-readable name.
+    pub name: String,
+    /// The identifier prefix (qb64).
+    pub prefix: String,
+    /// Signing algorithm code.
+    pub code: String,
+    /// Whether the identifier is transferable.
+    pub transferable: bool,
+    /// Derivation path index of the current signing keys.
+    pub signer_gen: usize,
+    /// How many current signing keys there are.
+    pub signer_count: usize,
+    /// Derivation path index of the pre-rotated next keys.
+    pub next_gen: usize,
+    /// How many pre-rotated next keys there are.
+    pub next_count: usize,
+    /// The internal generation counter, preserved verbatim so a resumed
+    /// identifier keeps deriving the same paths a continuous one would.
+    pub key_gen: usize,
+    /// SAID of the latest event.
+    pub last_said: String,
+    /// Current sequence number.
+    pub sn: u64,
+    /// Witness threshold.
+    pub backer_threshold: usize,
+    /// Witness prefixes.
+    pub backers: Vec<String>,
+}
+
+/// A signed event, before anything has been persisted.
+///
+/// Returned by the `*_event` constructors for callers that store the key event
+/// log somewhere other than a [`KeriStore`] — a `did:webs` `keri.cesr`
+/// artifact, for instance.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct SignedEvent {
+    /// SAID of the event.
+    pub said: String,
+    /// The serialized event body, without attachments.
+    pub raw: Vec<u8>,
+    /// The attached indexed signatures, qb64.
+    pub signatures: Vec<u8>,
+    /// Body and attachments together, as they belong in a CESR stream.
+    pub composed: Vec<u8>,
+}
+
 impl Hab {
     /// Create a new identifier via inception.
     ///
@@ -89,6 +164,30 @@ impl Hab {
         config: &InceptionConfig,
         store: &dyn KeriStore,
     ) -> Result<(Self, Vec<u8>), KeriError> {
+        let (hab, event) = Self::incept_inner(name, config, Some(store))?;
+        Ok((hab, event.composed))
+    }
+
+    /// Incept without a store, returning the signed event for the caller to
+    /// keep wherever the key event log lives.
+    ///
+    /// Pair with [`Hab::state`] and a safe home for the salt: those two are
+    /// everything needed to [`resume`](Hab::resume) later.
+    ///
+    /// # Errors
+    /// Returns [`KeriError`] if the event cannot be built or signed.
+    pub fn incept_event(
+        name: &str,
+        config: &InceptionConfig,
+    ) -> Result<(Self, SignedEvent), KeriError> {
+        Self::incept_inner(name, config, None)
+    }
+
+    fn incept_inner(
+        name: &str,
+        config: &InceptionConfig,
+        store: Option<&dyn KeriStore>,
+    ) -> Result<(Self, SignedEvent), KeriError> {
         // Build salter from config or generate random
         let salter = if let Some(ref salt) = config.salt {
             Salter::new("0A", salt.clone())?
@@ -178,23 +277,39 @@ impl Hab {
         let prefix = computed_said.clone();
 
         // Store event, KEL, first-seen, signatures, and hab metadata in one transaction
+        // The full resumable state, so a store-backed identifier can be picked
+        // up again later. It deliberately excludes the salt: that belongs
+        // wherever the application keeps secrets, not next to the key event
+        // log. Previously only {name, prefix, transferable, code} was written,
+        // which is not enough to sign anything.
         let hab_data = serde_json::json!({
             "name": name,
             "prefix": prefix,
-            "transferable": config.transferable,
             "code": config.code,
+            "transferable": config.transferable,
+            "signer_gen": 0,
+            "signer_count": config.count,
+            "next_gen": 1,
+            "next_count": config.next_count,
+            "key_gen": 2,
+            "last_said": computed_said,
+            "sn": 0,
+            "backer_threshold": config.backer_threshold,
+            "backers": config.backers,
         });
         let hab_bytes =
             serde_json::to_vec(&hab_data).map_err(|e| KeriError::Config(e.to_string()))?;
-        store.store_event_with_hab(
-            &computed_said,
-            serder.raw(),
-            &prefix,
-            0,
-            Some(&sig_bytes),
-            name,
-            &hab_bytes,
-        )?;
+        if let Some(store) = store {
+            store.store_event_with_hab(
+                &computed_said,
+                serder.raw(),
+                &prefix,
+                0,
+                Some(&sig_bytes),
+                name,
+                &hab_bytes,
+            )?;
+        }
 
         let hab = Hab {
             name: name.to_string(),
@@ -204,14 +319,24 @@ impl Hab {
             salter,
             transferable: config.transferable,
             code: config.code.clone(),
-            last_said: computed_said,
+            last_said: computed_said.clone(),
             sn: 0,
             key_gen: 2, // gen 0 = current, gen 1 = next
+            signer_gen: 0,
+            next_gen: 1,
             backer_threshold: config.backer_threshold,
             backers: config.backers.clone(),
         };
 
-        Ok((hab, composed))
+        Ok((
+            hab,
+            SignedEvent {
+                said: computed_said,
+                raw: serder.raw().to_vec(),
+                signatures: sig_bytes,
+                composed,
+            },
+        ))
     }
 
     /// Rotate the identifier's keys.
@@ -224,6 +349,23 @@ impl Hab {
         config: &RotationConfig,
         store: &dyn KeriStore,
     ) -> Result<Vec<u8>, KeriError> {
+        self.rotate_inner(config, Some(store)).map(|e| e.composed)
+    }
+
+    /// Rotate without a store, returning the signed event.
+    ///
+    /// # Errors
+    /// Returns [`KeriError`] if the identifier is not transferable, or the
+    /// event cannot be built or signed.
+    pub fn rotate_event(&mut self, config: &RotationConfig) -> Result<SignedEvent, KeriError> {
+        self.rotate_inner(config, None)
+    }
+
+    fn rotate_inner(
+        &mut self,
+        config: &RotationConfig,
+        store: Option<&dyn KeriStore>,
+    ) -> Result<SignedEvent, KeriError> {
         if !self.transferable {
             return Err(KeriError::Config(
                 "cannot rotate a non-transferable identifier".to_string(),
@@ -316,20 +458,26 @@ impl Hab {
         composed.extend_from_slice(&sig_bytes);
 
         // Store event, KEL, first-seen, signatures in one transaction
-        store.store_event(
-            &computed_said,
-            serder.raw(),
-            &self.prefix,
-            new_sn,
-            Some(&sig_bytes),
-        )?;
+        if let Some(store) = store {
+            store.store_event(
+                &computed_said,
+                serder.raw(),
+                &self.prefix,
+                new_sn,
+                Some(&sig_bytes),
+            )?;
+        }
 
         // Update internal state
         self.signers = new_signers;
         self.next_signers = new_next_signers;
-        self.last_said = computed_said;
+        self.last_said = computed_said.clone();
         self.sn = new_sn;
         self.key_gen = next_gen + 1;
+        // The keys just installed are the ones that were pre-rotated, so they
+        // sit at the generation the previous state called `next_gen`.
+        self.signer_gen = self.next_gen;
+        self.next_gen = next_gen;
 
         // Update backers: remove then add
         self.backers.retain(|b| !config.backers_remove.contains(b));
@@ -339,7 +487,82 @@ impl Hab {
             }
         }
 
-        Ok(composed)
+        Ok(SignedEvent {
+            said: computed_said,
+            raw: serder.raw().to_vec(),
+            signatures: sig_bytes,
+            composed,
+        })
+    }
+
+    /// The state needed to resume this identifier later, minus the salt.
+    ///
+    /// Persist this alongside the key event log; keep the salt wherever the
+    /// application keeps secrets. [`Hab::resume`] puts the two back together.
+    pub fn state(&self) -> HabState {
+        HabState {
+            name: self.name.clone(),
+            prefix: self.prefix.clone(),
+            code: self.code.clone(),
+            transferable: self.transferable,
+            signer_gen: self.signer_gen,
+            signer_count: self.signers.len(),
+            next_gen: self.next_gen,
+            next_count: self.next_signers.len(),
+            key_gen: self.key_gen,
+            last_said: self.last_said.clone(),
+            sn: self.sn,
+            backer_threshold: self.backer_threshold,
+            backers: self.backers.clone(),
+        }
+    }
+
+    /// Rebuild an identifier from persisted state and its salt.
+    ///
+    /// Both signing key sets are re-derived from the salt at the generations
+    /// the state records, so a resumed `Hab` signs exactly what an unbroken one
+    /// would. Nothing is read from a store — the caller decides where the state
+    /// and the salt were kept.
+    ///
+    /// # Errors
+    /// Returns [`KeriError`] if the salt or the derived keys are unusable.
+    pub fn resume(state: &HabState, salt: &[u8]) -> Result<Self, KeriError> {
+        let salter = Salter::new("0A", salt.to_vec())?;
+
+        let derive = |generation: usize, count: usize| -> Result<Vec<Signer>, KeriError> {
+            (0..count)
+                .map(|i| {
+                    salter
+                        .signer(
+                            &state.code,
+                            &format!("{generation}.{i}"),
+                            "low",
+                            state.transferable,
+                        )
+                        .map_err(KeriError::from)
+                })
+                .collect()
+        };
+
+        let signers = derive(state.signer_gen, state.signer_count)?;
+        let next_signers = derive(state.next_gen, state.next_count)?;
+
+        Ok(Self {
+            name: state.name.clone(),
+            prefix: state.prefix.clone(),
+            signers,
+            next_signers,
+            salter,
+            transferable: state.transferable,
+            code: state.code.clone(),
+            last_said: state.last_said.clone(),
+            sn: state.sn,
+            key_gen: state.key_gen,
+            signer_gen: state.signer_gen,
+            next_gen: state.next_gen,
+            backer_threshold: state.backer_threshold,
+            backers: state.backers.clone(),
+        })
     }
 
     /// Create an interaction event with the given anchors.
@@ -351,6 +574,26 @@ impl Hab {
         anchors: &[serde_json::Value],
         store: &dyn KeriStore,
     ) -> Result<Vec<u8>, KeriError> {
+        self.interact_inner(anchors, Some(store))
+            .map(|e| e.composed)
+    }
+
+    /// Create an interaction event without a store.
+    ///
+    /// # Errors
+    /// Returns [`KeriError`] if the event cannot be built or signed.
+    pub fn interact_event(
+        &mut self,
+        anchors: &[serde_json::Value],
+    ) -> Result<SignedEvent, KeriError> {
+        self.interact_inner(anchors, None)
+    }
+
+    fn interact_inner(
+        &mut self,
+        anchors: &[serde_json::Value],
+        store: Option<&dyn KeriStore>,
+    ) -> Result<SignedEvent, KeriError> {
         let new_sn = self.sn + 1;
 
         // Build interaction SAD
@@ -393,19 +636,26 @@ impl Hab {
         composed.extend_from_slice(&sig_bytes);
 
         // Store event, KEL, first-seen, signatures in one transaction
-        store.store_event(
-            &computed_said,
-            serder.raw(),
-            &self.prefix,
-            new_sn,
-            Some(&sig_bytes),
-        )?;
+        if let Some(store) = store {
+            store.store_event(
+                &computed_said,
+                serder.raw(),
+                &self.prefix,
+                new_sn,
+                Some(&sig_bytes),
+            )?;
+        }
 
         // Update state
-        self.last_said = computed_said;
+        self.last_said = computed_said.clone();
         self.sn = new_sn;
 
-        Ok(composed)
+        Ok(SignedEvent {
+            said: computed_said,
+            raw: serder.raw().to_vec(),
+            signatures: sig_bytes,
+            composed,
+        })
     }
 
     /// Generate a receipt attachment for another event.
