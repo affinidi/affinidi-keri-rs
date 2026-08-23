@@ -1,6 +1,6 @@
 [package]
 name = "affinidi-keri-core"
-version = "0.3.1"
+version = "0.3.2"
 description = "Core KERI protocol: key events, serialization, CESR stream parsing and key event log verification"
 edition.workspace = true
 rust-version.workspace = true

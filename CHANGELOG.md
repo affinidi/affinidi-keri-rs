@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-23
+
+### Security
+
+- **Regression tests for the pre-authentication panic fixed in #3.** The ASCII
+  guard in `Version::parse_str` sliced `vs[..17]` as a `&str`, which panics when
+  byte 17 is not a character boundary — so the check meant to *reject*
+  non-ASCII input could crash on it first. `Version::parse` is the first
+  function called on every inbound message, before any signature is verified,
+  so an unauthenticated peer could crash the process with an 18-byte payload.
+
+  The one-line fix landed in #3. It shipped without a test that reproduces the
+  crash: the two existing non-ASCII tests use a payload exactly 17 bytes long,
+  so byte 17 is the end of the string and every character boundary aligns. They
+  pass with or without the fix. The payload quoted in #3's own description has
+  the same problem — it puts byte 17 on a boundary and returns an error either
+  way.
+
+  Added `test_parse_multibyte_straddling_the_guard_boundary`, covering 2-, 3-
+  and 4-byte characters positioned to span byte 17, and
+  `test_parse_every_multibyte_offset_is_rejected`, which walks each width across
+  every offset that can overlap the boundary. Both panic without the fix.
+
 ## [0.3.1] - 2026-08-23
 
 ### Fixed
