@@ -6,6 +6,15 @@ version = 2
 # 0.11 legitimately coexist. Revisit if the list grows beyond that.
 multiple-versions = "warn"
 
+# bincode is permanently unmaintained (RUSTSEC-2025-0141). It was never a
+# direct dependency — it came in through `heed`'s default features, which we
+# now switch off because only the `Str` and `Bytes` codecs are ever used. The
+# ban is here rather than left to `audit`, because a feature flag flipped back
+# on somewhere in the graph would otherwise reintroduce it silently and only
+# surface on the next advisory-database run.
+[[bans.deny]]
+name = "bincode"
+
 [licenses]
 confidence-threshold = 0.93
 allow = [

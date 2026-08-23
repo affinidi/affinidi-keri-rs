@@ -73,7 +73,12 @@ subtle = "2"
 base64ct = { version = "1", features = ["alloc"] }
 
 # Storage
-heed = "0.22"
+# `default-features = false` drops heed's `serde-bincode`/`serde-json`/`serde`
+# features. `affinidi-keri-db` only ever uses the `Str` and `Bytes` codecs, so
+# none of the serde-backed heed types are needed, and the default set pulled in
+# `bincode` 1.3.3 — permanently unmaintained (RUSTSEC-2025-0141). Re-enabling
+# any of these features brings that advisory back into the tree.
+heed = { version = "0.22", default-features = false }
 
 # Error handling & logging
 thiserror = "2"
