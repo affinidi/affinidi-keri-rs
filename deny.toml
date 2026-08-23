@@ -1,0 +1,28 @@
+[advisories]
+version = 2
+
+[bans]
+# blake2 has no release on the 0.11 `digest` generation, so `digest` 0.10 and
+# 0.11 legitimately coexist. Revisit if the list grows beyond that.
+multiple-versions = "warn"
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "0BSD",
+  "CC0-1.0",
+  "ISC",
+  "MIT-0",
+  "MIT",
+  "Unlicense",
+  "Zlib",
+  "Unicode-3.0",
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

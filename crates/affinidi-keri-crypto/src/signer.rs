@@ -196,7 +196,15 @@ impl Signer {
 
                 let signing_key = SigningKey::from_slice(raw)
                     .map_err(|_| CryptoError::InvalidKey("invalid signing key".into()))?;
-                let pubkey = signing_key.verifying_key().to_sec1_bytes().to_vec();
+                // Compression is requested explicitly: `to_sec1_bytes()` follows
+                // each curve's `PointCompression` default — compressed for
+                // k256, uncompressed for p256 — and the CESR codes here are
+                // all 33-byte compressed points.
+                let pubkey = signing_key
+                    .verifying_key()
+                    .to_sec1_point(true)
+                    .as_bytes()
+                    .to_vec();
                 let verfer_code = if transferable { "1AAB" } else { "1AAA" };
                 Verfer::new(verfer_code, pubkey)
             }
@@ -207,7 +215,7 @@ impl Signer {
                     .map_err(|_| CryptoError::InvalidKey("invalid signing key".into()))?;
                 let pubkey = signing_key
                     .verifying_key()
-                    .to_encoded_point(true)
+                    .to_sec1_point(true)
                     .as_bytes()
                     .to_vec();
                 let verfer_code = if transferable { "1AAJ" } else { "1AAI" };

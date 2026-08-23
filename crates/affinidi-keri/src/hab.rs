@@ -5,6 +5,8 @@
 //! interaction, and receipt generation.
 
 use affinidi_cesr::Counter;
+use affinidi_keri_core::composer::counter_code_for;
+use affinidi_keri_core::counter_table::GroupKind;
 use affinidi_keri_core::said;
 use affinidi_keri_core::serder::Serder;
 use affinidi_keri_core::version::SerializationKind;
@@ -159,8 +161,11 @@ impl Hab {
             sig_bytes.extend_from_slice(qb64.as_bytes());
         }
 
-        // Build counter for controller indexed signatures
-        let counter = Counter::new("-B", signers.len())?;
+        // Build counter for controller indexed signatures. The code comes
+        // from the event's own protocol version so that composing and parsing
+        // cannot drift apart.
+        let code = counter_code_for(&serder, GroupKind::ControllerIdxSigs)?;
+        let counter = Counter::new(code, signers.len())?;
         let counter_qb64 = counter.qb64()?;
 
         // Compose the full message: event + counter + signatures
@@ -294,7 +299,8 @@ impl Hab {
         }
 
         // Build counter
-        let counter = Counter::new("-B", self.signers.len())?;
+        let code = counter_code_for(&serder, GroupKind::ControllerIdxSigs)?;
+        let counter = Counter::new(code, self.signers.len())?;
         let counter_qb64 = counter.qb64()?;
 
         // Compose message
@@ -370,7 +376,8 @@ impl Hab {
         }
 
         // Build counter
-        let counter = Counter::new("-B", self.signers.len())?;
+        let code = counter_code_for(&serder, GroupKind::ControllerIdxSigs)?;
+        let counter = Counter::new(code, self.signers.len())?;
         let counter_qb64 = counter.qb64()?;
 
         // Compose message
@@ -410,7 +417,8 @@ impl Hab {
             let prefix_qb64 = self.signers[0].verfer().qb64()?;
             let cigar_qb64 = cigar.qb64()?;
 
-            let counter = Counter::new("-D", 1)?;
+            let code = counter_code_for(other_serder, GroupKind::NonTransReceiptCouples)?;
+            let counter = Counter::new(code, 1)?;
             let counter_qb64 = counter.qb64()?;
 
             receipt_msg.extend_from_slice(counter_qb64.as_bytes());
@@ -425,7 +433,8 @@ impl Hab {
                 sig_bytes.extend_from_slice(qb64.as_bytes());
             }
 
-            let counter = Counter::new("-B", self.signers.len())?;
+            let code = counter_code_for(other_serder, GroupKind::ControllerIdxSigs)?;
+            let counter = Counter::new(code, self.signers.len())?;
             let counter_qb64 = counter.qb64()?;
 
             receipt_msg.extend_from_slice(counter_qb64.as_bytes());
@@ -506,14 +515,16 @@ impl Hab {
 
     /// Get the receipt couples as a `-D` attachment block from multiple witnesses.
     ///
-    /// Returns the composed CESR bytes: `-D` counter + (prefix + cigar) couples.
+    /// Returns the composed CESR bytes: a non-transferable receipt couple
+    /// counter followed by (prefix + cigar) couples.
     pub fn compose_witness_receipt_attachment(
         event_serder: &Serder,
         witness_habs: &[&Hab],
     ) -> Result<Vec<u8>, KeriError> {
         let couples = Self::collect_witness_receipts(event_serder, witness_habs)?;
 
-        let counter = Counter::new("-D", couples.len())?;
+        let code = counter_code_for(event_serder, GroupKind::NonTransReceiptCouples)?;
+        let counter = Counter::new(code, couples.len())?;
         let counter_qb64 = counter.qb64()?;
 
         let mut output = Vec::new();
@@ -751,7 +762,8 @@ mod tests {
         let receipt_str = std::str::from_utf8(&receipt).unwrap();
 
         // Non-transferable receipt should use -D counter
-        assert!(receipt_str.starts_with("-D"));
+        // KERI 1.x non-transferable receipt couples.
+        assert!(receipt_str.starts_with("-C"), "got {receipt_str}");
 
         // Should contain: counter(4) + prefix(44) + cigar(88) = 136
         assert_eq!(receipt.len(), 4 + 44 + 88);
@@ -768,7 +780,8 @@ mod tests {
         let receipt_str = std::str::from_utf8(&receipt).unwrap();
 
         // Transferable receipt should use -B counter
-        assert!(receipt_str.starts_with("-B"));
+        // KERI 1.x controller indexed sigs.
+        assert!(receipt_str.starts_with("-A"), "got {receipt_str}");
     }
 
     #[test]

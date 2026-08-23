@@ -6,14 +6,40 @@
 use affinidi_cesr::Counter;
 use affinidi_keri_crypto::{Cigar, Siger};
 
+use crate::counter_table::{CounterTable, GroupKind};
 use crate::error::CoreError;
 use crate::serder::Serder;
 
+/// The counter table an event's own version string implies.
+///
+/// Composing and parsing must agree, so both derive the table the same way
+/// rather than hard-coding counter codes. A `KERI10JSON…` event gets the 1.x
+/// table, where controller signatures are `-A` — not `-B`, which is what the
+/// 2.x table calls them.
+pub fn table_for(serder: &Serder) -> CounterTable {
+    serder
+        .version
+        .as_ref()
+        .map_or(CounterTable::default(), |v| {
+            CounterTable::from_major(v.major)
+        })
+}
+
+/// The counter code for `kind` under the table implied by `serder`.
+///
+/// # Errors
+/// Returns `CoreError` if the group has no code in that table.
+pub fn counter_code_for(serder: &Serder, kind: GroupKind) -> Result<&'static str, CoreError> {
+    let table = table_for(serder);
+    kind.code(table)
+        .ok_or_else(|| CoreError::ParseError(format!("{kind:?} has no counter code in {table:?}")))
+}
+
 /// Compose a signed event message.
 ///
-/// Concatenates the serialized event body with a `-B` counter code
-/// (controller indexed signatures) followed by each indexed signature
-/// in qb64 encoding.
+/// Concatenates the serialized event body with the controller-indexed-signature
+/// counter code for the event's protocol version, followed by each indexed
+/// signature in qb64 encoding.
 ///
 /// # Errors
 /// Returns `CoreError` if the counter or signatures cannot be encoded.
@@ -24,8 +50,8 @@ pub fn compose_event(serder: &Serder, sigs: &[Siger]) -> Result<Vec<u8>, CoreErr
     output.extend_from_slice(serder.raw());
 
     if !sigs.is_empty() {
-        // Controller indexed sigs counter: -B with count of signatures
-        let counter = Counter::new("-B", sigs.len())
+        let code = counter_code_for(serder, GroupKind::ControllerIdxSigs)?;
+        let counter = Counter::new(code, sigs.len())
             .map_err(|e| CoreError::ParseError(format!("failed to create counter: {e}")))?;
         let counter_qb64 = counter
             .qb64()
@@ -44,9 +70,9 @@ pub fn compose_event(serder: &Serder, sigs: &[Siger]) -> Result<Vec<u8>, CoreErr
 
 /// Compose a non-transferable receipt message.
 ///
-/// Concatenates the serialized event body with a `-D` counter code
-/// (non-transferable receipt couples) followed by the prefix qb64
-/// and cigar (non-indexed signature) qb64.
+/// Concatenates the serialized event body with the non-transferable receipt
+/// couple counter code for the event's protocol version, followed by the
+/// prefix qb64 and cigar (non-indexed signature) qb64.
 ///
 /// # Errors
 /// Returns `CoreError` if the counter or primitives cannot be encoded.
@@ -56,8 +82,8 @@ pub fn compose_receipt(serder: &Serder, prefix: &str, cigar: &Cigar) -> Result<V
     // Message body
     output.extend_from_slice(serder.raw());
 
-    // Non-transferable receipt couples counter: -D with count 1
-    let counter = Counter::new("-D", 1)
+    let code = counter_code_for(serder, GroupKind::NonTransReceiptCouples)?;
+    let counter = Counter::new(code, 1)
         .map_err(|e| CoreError::ParseError(format!("failed to create counter: {e}")))?;
     let counter_qb64 = counter
         .qb64()
@@ -76,8 +102,8 @@ pub fn compose_receipt(serder: &Serder, prefix: &str, cigar: &Cigar) -> Result<V
 
 /// Compose a message with witness indexed signatures.
 ///
-/// Similar to `compose_event` but uses the `-C` counter code
-/// (witness indexed signatures).
+/// Similar to `compose_event` but uses the witness-indexed-signature counter
+/// code for the event's protocol version.
 ///
 /// # Errors
 /// Returns `CoreError` if encoding fails.
@@ -88,8 +114,8 @@ pub fn compose_witness_sigs(serder: &Serder, sigs: &[Siger]) -> Result<Vec<u8>, 
     output.extend_from_slice(serder.raw());
 
     if !sigs.is_empty() {
-        // Witness indexed sigs counter: -C with count of signatures
-        let counter = Counter::new("-C", sigs.len())
+        let code = counter_code_for(serder, GroupKind::WitnessIdxSigs)?;
+        let counter = Counter::new(code, sigs.len())
             .map_err(|e| CoreError::ParseError(format!("failed to create counter: {e}")))?;
         let counter_qb64 = counter
             .qb64()
@@ -153,8 +179,8 @@ mod tests {
 
         // Should have counter code after message body
         let attachment_part = std::str::from_utf8(&composed[serder.size()..]).unwrap();
-        // -B counter with count 1 = "-BAB"
-        assert!(attachment_part.starts_with("-B"));
+        // KERI 1.x controller indexed sigs: "-A" with count 1 = "-AAB".
+        assert!(attachment_part.starts_with("-AAB"), "got {attachment_part}");
 
         // Total size: message + 4 (counter) + 88 (ed25519 indexed sig)
         assert_eq!(composed.len(), serder.size() + 4 + 88);
@@ -198,7 +224,8 @@ mod tests {
 
         // Should have -D counter after message
         let att_str = std::str::from_utf8(&composed[serder.size()..]).unwrap();
-        assert!(att_str.starts_with("-D"));
+        // KERI 1.x non-transferable receipt couples.
+        assert!(att_str.starts_with("-C"), "got {att_str}");
 
         // Size: message + 4 (counter) + 44 (prefix qb64) + 88 (cigar qb64)
         assert_eq!(composed.len(), serder.size() + 4 + 44 + 88);
@@ -213,6 +240,7 @@ mod tests {
         let composed = compose_witness_sigs(&serder, &[sig]).unwrap();
 
         let att_str = std::str::from_utf8(&composed[serder.size()..]).unwrap();
-        assert!(att_str.starts_with("-C"));
+        // KERI 1.x witness indexed sigs.
+        assert!(att_str.starts_with("-B"), "got {att_str}");
     }
 }

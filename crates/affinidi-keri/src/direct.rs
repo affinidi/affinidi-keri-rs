@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use affinidi_keri_core::CoreError;
 use affinidi_keri_core::kever::Kever;
 use affinidi_keri_core::parser::{self, Attachment, ParsedMessage};
 use affinidi_keri_core::serder::Serder;
@@ -104,7 +105,21 @@ pub fn process_parsed(
             Attachment::ReceiptCouples(couples) => {
                 receipt_couples.extend_from_slice(couples);
             }
-            Attachment::WitnessSigs(_) | Attachment::Raw(_) => {}
+            // A group we could not interpret may be carrying the very
+            // signatures this function is about to check, so refuse the
+            // message rather than process it as if nothing were attached.
+            Attachment::Unknown { code, .. } => {
+                return Err(KeriError::Core(CoreError::ParseError(format!(
+                    "message for '{prefix}' carries an uninterpreted attachment \
+                     group {code:?}; refusing to process it"
+                ))));
+            }
+            Attachment::WitnessSigs(_)
+            | Attachment::FirstSeenReplayCouples(_)
+            | Attachment::SealSourceCouples(_) => {}
+            // `Attachment` is non-exhaustive; a group added later is ignored
+            // here only because it is not one this path verifies against.
+            _ => {}
         }
     }
 
