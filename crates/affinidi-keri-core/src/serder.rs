@@ -242,18 +242,42 @@ impl Serder {
 /// For JSON, the version string appears inside `{"v":"KERI10JSON..."}` so we
 /// scan for a known protocol prefix. For CBOR/MGPK, the version string
 /// may also be embedded but we use the same scanning approach.
+/// How far into a message to look for its version string.
+///
+/// The version string is the first field of every KERI and ACDC message, so it
+/// sits within the first handful of bytes (`{"v":"` puts it at 6 in compact
+/// JSON). Searching further is not merely wasteful — see
+/// [`extract_version_from_raw`].
+const VERSION_SEARCH_WINDOW: usize = 32;
+
+/// Find the version string at the start of a message.
+///
+/// Only the first [`VERSION_SEARCH_WINDOW`] bytes are searched, and the
+/// **earliest** protocol tag wins rather than a fixed protocol order.
+///
+/// Both of those matter. This used to scan the whole remaining buffer for
+/// `KERI`, then `ACDC`, then `SAID` — so parsing an ACDC in a stream that
+/// contained a KERI event *anywhere after it* found that later event's version
+/// string and took its declared size for the ACDC. The ACDC was then sliced to
+/// the wrong length and the whole stream failed to parse. Since the size drives
+/// how the stream is cut into messages, a message could also steer how much of
+/// the buffer a *different* message was read from.
+///
+/// Streams of exactly that shape are ordinary: a `did:webs` artifact carrying a
+/// credential followed by further key events, or any vLEI chain.
 fn extract_version_from_raw(data: &[u8], _kind: SerializationKind) -> Option<Version> {
-    // Look for a known protocol prefix in the raw bytes
+    let window = &data[..data.len().min(VERSION_SEARCH_WINDOW)];
     let protocols = [b"KERI" as &[u8], b"ACDC", b"SAID"];
-    for proto in &protocols {
-        if let Some(pos) = data.windows(proto.len()).position(|w| w == *proto)
-            && pos + KERI_VER_FULLSIZE <= data.len()
-            && let Ok(ver) = Version::parse(&data[pos..])
-        {
-            return Some(ver);
-        }
+
+    let pos = protocols
+        .iter()
+        .filter_map(|proto| window.windows(proto.len()).position(|w| w == *proto))
+        .min()?;
+
+    if pos + KERI_VER_FULLSIZE > data.len() {
+        return None;
     }
-    None
+    Version::parse(&data[pos..]).ok()
 }
 
 /// Detect serialization kind from the first byte of raw data.

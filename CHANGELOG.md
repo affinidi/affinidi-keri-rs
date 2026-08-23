@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-23
+
+### Fixed
+
+- **A message could take its length from a different message.** The version
+  string is the first field of every KERI and ACDC message, but the scanner
+  searched the entire remaining buffer for a protocol tag, and tried `KERI`
+  before `ACDC` regardless of where each appeared. Parsing an ACDC in a stream
+  that contained a KERI event *anywhere after it* therefore found that later
+  event's version string and used its declared size for the ACDC — slicing the
+  ACDC to the wrong length and failing the whole stream. Because the declared
+  size is what cuts a stream into messages, one message could also steer how
+  much of the buffer another was read from.
+
+  The search is now bounded to the first 32 bytes, and the earliest protocol tag
+  wins rather than a fixed protocol order.
+
+  Streams of exactly this shape are ordinary — a `did:webs` artifact carrying a
+  credential followed by further key events, or any vLEI chain. The published
+  conformance artifact hid it only because its ACDC happens to be the last
+  message.
+
 ## [0.3.0] - 2026-08-23
 
 Delegation is now verified. Building the tests for it surfaced two further

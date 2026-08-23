@@ -1,6 +1,6 @@
 [package]
 name = "affinidi-keri-crypto"
-version = "0.3.0"
+version = "0.3.1"
 description = "Cryptographic primitives for KERI: signing, digests, key derivation and CESR-coded key material"
 edition.workspace = true
 rust-version.workspace = true

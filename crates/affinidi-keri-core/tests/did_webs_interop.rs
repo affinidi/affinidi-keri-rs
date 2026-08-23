@@ -167,3 +167,48 @@ fn tampering_with_an_event_is_rejected() {
         "a tampered inception event must not produce a key state",
     );
 }
+
+#[test]
+fn an_acdc_followed_by_a_key_event_still_parses() {
+    // The version string is the first field of a message, but the scanner used
+    // to search the whole remaining buffer for a protocol tag — and tried
+    // `KERI` before `ACDC` regardless of position. So an ACDC parsed in a
+    // stream containing any later KERI event picked up *that* event's declared
+    // size and was sliced to the wrong length.
+    //
+    // The published artifact hides this because its ACDC happens to be last.
+    // Streams of this shape are ordinary: a credential followed by further key
+    // events, which is every vLEI chain.
+    let mut sad = serde_json::json!({
+        "v": "KERI10JSON000000_",
+        "t": "rev",
+        "d": "ERevocation000000000000000000000000000000000",
+        "i": "EIEXitNCXQ_Y7HC6I7oiY7fPrRJyJzwvn_YIjvSHPzav",
+        "s": "1",
+        "ri": "EHfE7gojVcX5Ldu8zzBr9WZhVz2ZP7XoYDaVEtqcyDRP",
+        "dt": "2024-01-01T00:00:00.000000+00:00",
+    });
+    let len = serde_json::to_vec(&sad).expect("serializes").len();
+    sad["v"] = serde_json::json!(format!("KERI10JSON{len:06x}_"));
+
+    let mut stream = ARTIFACT.to_vec();
+    stream.extend_from_slice(&serde_json::to_vec(&sad).expect("serializes"));
+
+    let messages = parser::parse_all(&stream).expect("an ACDC followed by a key event must parse");
+
+    assert_eq!(
+        messages.len(),
+        7,
+        "six original messages plus the appended one"
+    );
+    assert_eq!(
+        messages[5].serder.size(),
+        1522,
+        "the ACDC keeps its own declared size, not the following event's",
+    );
+    assert_eq!(
+        messages[6].serder.ilk().expect("ilk"),
+        "rev",
+        "the appended event parses as itself",
+    );
+}
