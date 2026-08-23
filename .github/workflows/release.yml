@@ -7,10 +7,27 @@ name: release
 # The tag must match the version in every crate manifest — `verify` below
 # enforces that, so a mistyped tag fails before anything is published.
 #
-# NOTE: crates.io will not accept the FIRST publish of a crate name from CI
-# when the account uses Trusted Publishing — a brand-new crate returns 403.
-# Each of these four crates must be published once by a human with
-# `cargo publish`; every release after that runs here.
+# BEFORE THE FIRST RELEASE, in this order:
+#
+#   1. A human publishes each crate once, in dependency order, with their own
+#      crates.io token:
+#
+#        cargo publish -p affinidi-keri-crypto
+#        cargo publish -p affinidi-keri-core
+#        cargo publish -p affinidi-keri-db
+#        cargo publish -p affinidi-keri
+#
+#      CI cannot do this. Trusted Publishing is configured per crate on
+#      crates.io, and a crate that does not exist yet has nothing to configure,
+#      so a brand-new name returns 403 from CI.
+#
+#   2. On crates.io, for EACH of the four crates: Settings -> Trusted
+#      Publishing -> add repository `affinidi/affinidi-keri-rs`, workflow
+#      `release.yml`, environment `release`. All three must match this file
+#      exactly or the OIDC exchange is rejected.
+#
+# Until step 2 is done for a crate, the auth step below falls back to a
+# `CARGO_REGISTRY_TOKEN` secret, which is not currently set on this repo.
 on:
   push:
     tags:
@@ -64,10 +81,13 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || inputs.dry_run == false
-    environment: crates-io
+    # `release` matches the environment name the org's other Rust repos use,
+    # and is the name that must be entered in each crate's Trusted Publishing
+    # configuration on crates.io.
+    environment: release
     permissions:
       contents: write
-      id-token: write
+      id-token: write # required for OIDC trusted publishing
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -76,9 +96,17 @@ jobs:
       # Dependency order. Each crate must be visible in the registry index
       # before the next one can resolve it, so wait for it rather than
       # sleeping a fixed amount and hoping.
+      # Mints a short-lived token from this run's OIDC identity. Non-fatal: a
+      # crate whose Trusted Publishing is not configured yet falls back to the
+      # CARGO_REGISTRY_TOKEN secret below.
+      - name: Authenticate to crates.io (OIDC trusted publishing)
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+        continue-on-error: true
+
       - name: Publish crates in dependency order
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
