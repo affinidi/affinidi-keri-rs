@@ -1,6 +1,6 @@
 [package]
 name = "affinidi-keri-db"
-version = "0.3.0"
+version = "0.3.1"
 description = "Storage layer for KERI: LMDB-backed persistence for key event logs, receipts, key state and escrow"
 edition.workspace = true
 rust-version.workspace = true
