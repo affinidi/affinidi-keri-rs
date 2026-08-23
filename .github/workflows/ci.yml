@@ -73,6 +73,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      # Cargo.lock is not committed, and `audit-check` reads `./Cargo.lock`
+      # rather than resolving for itself. Generating it here also means the
+      # audit runs against a fresh resolution, so an advisory that upstream has
+      # already patched clears on its own.
+      - run: cargo generate-lockfile
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
