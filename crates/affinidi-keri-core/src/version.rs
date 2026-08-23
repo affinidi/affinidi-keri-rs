@@ -289,6 +289,63 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_multibyte_straddling_the_guard_boundary() {
+        // The guard slices `vs[..17]`, and a `&str` slice panics when byte 17
+        // is not a char boundary — so the check meant to reject non-ASCII
+        // could crash before rejecting anything. `Version::parse` is the first
+        // function called on every inbound message, before any signature is
+        // checked, so this was reachable by an unauthenticated peer.
+        //
+        // The two tests above do NOT cover it: their payload is exactly 17
+        // bytes, so byte 17 is the end of the string and every boundary
+        // aligns. The character has to *span* byte 17.
+        for (label, payload) in [
+            // 2-byte char at bytes 16..18
+            ("2-byte", "KERI10JSON000000\u{016D}"),
+            // 3-byte char at bytes 15..18
+            ("3-byte", "KERI10JSON00000\u{20AC}xx"),
+            // 4-byte char at bytes 14..18
+            ("4-byte", "KERI10JSON0000\u{1F600}xx"),
+        ] {
+            let result = Version::parse_str(payload);
+            assert!(
+                result.is_err(),
+                "{label} payload straddling byte 17 must be rejected, not parsed",
+            );
+            assert!(
+                result.unwrap_err().to_string().contains("non-ASCII"),
+                "{label} payload should be rejected as non-ASCII",
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_every_multibyte_offset_is_rejected() {
+        // Walk a multi-byte character across every offset that can overlap the
+        // guard boundary, so a future change to the guard cannot reintroduce
+        // the panic at some offset the fixed payloads above happen to miss.
+        for width in [2usize, 3, 4] {
+            let ch = match width {
+                2 => '\u{016D}',
+                3 => '\u{20AC}',
+                _ => '\u{1F600}',
+            };
+            for prefix in 0..=KERI_VER_FULLSIZE {
+                let mut payload = "K".repeat(prefix);
+                payload.push(ch);
+                payload.push_str(&"_".repeat(KERI_VER_FULLSIZE));
+
+                // Must return, never panic. Content is nonsense, so the only
+                // acceptable outcome is an error.
+                assert!(
+                    Version::parse_str(&payload).is_err(),
+                    "width {width} at offset {prefix} should be rejected",
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_parse_too_short() {
         assert!(Version::parse_str("KERI10JSON").is_err());
     }

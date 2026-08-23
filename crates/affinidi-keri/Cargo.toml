@@ -1,6 +1,6 @@
 [package]
 name = "affinidi-keri"
-version = "0.3.1"
+version = "0.3.2"
 description = "KERI identity management: identifier registry, direct mode protocol and duplicity detection"
 edition.workspace = true
 rust-version.workspace = true
