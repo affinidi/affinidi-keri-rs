@@ -89,29 +89,29 @@ impl Threshold {
     /// A simple threshold is a JSON string like `"1"` or `"2"`.
     /// A weighted threshold is a nested JSON array of fractional strings,
     /// e.g. `[["1/2", "1/2", "1/2"]]`.
+    ///
+    /// `"0"` parses. It is how an event commits to no next keys (`nt: "0"`
+    /// with an empty `n`), which abandons the identifier: no event may
+    /// follow. Whether a threshold fits its key list — a signing threshold
+    /// of at least 1, a zero next threshold only with no next keys — is
+    /// checked against that list by [`crate::key_state::KeyState`], since
+    /// the parser sees the threshold alone.
     pub fn from_json_value(value: &serde_json::Value) -> Result<Self, CoreError> {
         match value {
             serde_json::Value::String(s) => {
                 let n: usize = s
                     .parse()
                     .map_err(|_| CoreError::Validation(format!("invalid threshold string: {s}")))?;
-                if n == 0 {
-                    return Err(CoreError::Validation(
-                        "signing threshold must be at least 1".into(),
-                    ));
-                }
                 Ok(Threshold::Simple(n))
             }
             serde_json::Value::Number(n) => {
                 let n = n.as_u64().ok_or_else(|| {
                     CoreError::Validation(format!("invalid threshold number: {n}"))
                 })?;
-                if n == 0 {
-                    return Err(CoreError::Validation(
-                        "signing threshold must be at least 1".into(),
-                    ));
-                }
-                Ok(Threshold::Simple(n as usize))
+                let n = usize::try_from(n).map_err(|_| {
+                    CoreError::Validation(format!("threshold number out of range: {n}"))
+                })?;
+                Ok(Threshold::Simple(n))
             }
             serde_json::Value::Array(clauses) => {
                 if clauses.is_empty() {
@@ -145,6 +145,46 @@ impl Threshold {
             _ => Err(CoreError::Validation(format!(
                 "invalid threshold value: {value}"
             ))),
+        }
+    }
+
+    /// Whether this is the zero threshold, `"0"`.
+    pub fn is_zero(&self) -> bool {
+        matches!(self, Threshold::Simple(0))
+    }
+
+    /// The number of keys this threshold assigns a weight to: `n` for a
+    /// simple threshold `n`, the number of weights for a weighted one.
+    fn size(&self) -> usize {
+        match self {
+            Threshold::Simple(n) => *n,
+            Threshold::Weighted(clauses) => clauses.iter().map(Vec::len).sum(),
+        }
+    }
+
+    /// Check that this threshold can be met by a list of `keys` keys.
+    ///
+    /// A simple threshold must lie in `1..=keys`. A weighted one must weigh
+    /// no more keys than there are, and must be met when every key signs.
+    /// A threshold that cannot be met makes the key set unusable: for a
+    /// signing threshold no event could follow, for a next threshold no
+    /// rotation could.
+    ///
+    /// # Errors
+    /// Returns [`CoreError::Validation`] naming `what` (`"kt"`, `"nt"`) if not.
+    pub fn check_satisfiable(&self, keys: usize, what: &str) -> Result<(), CoreError> {
+        let all: Vec<usize> = (0..keys).collect();
+        let ok = match self {
+            Threshold::Simple(n) => *n >= 1 && *n <= keys,
+            Threshold::Weighted(_) => self.size() <= keys && self.is_satisfied(&all, keys),
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(CoreError::Validation(format!(
+                "{what} {} cannot be met by {keys} key(s)",
+                self.to_json_value()
+            )))
         }
     }
 
@@ -403,12 +443,20 @@ mod tests {
     }
 
     #[test]
-    fn test_zero_simple_threshold_rejected() {
+    fn a_zero_simple_threshold_parses() {
+        // `nt: "0"` is how an event commits to no next keys. A zero signing
+        // threshold is refused against its key list, by `KeyState`.
         let v = serde_json::json!("0");
-        assert!(Threshold::from_json_value(&v).is_err());
+        assert_eq!(
+            Threshold::from_json_value(&v).unwrap(),
+            Threshold::Simple(0)
+        );
 
         let v = serde_json::json!(0);
-        assert!(Threshold::from_json_value(&v).is_err());
+        assert_eq!(
+            Threshold::from_json_value(&v).unwrap(),
+            Threshold::Simple(0)
+        );
     }
 
     #[test]
