@@ -33,7 +33,7 @@ pub const DEFAULT_DIGEST_CODE: &str = "E";
 /// Returns `CoreError` if the value is not an object, the label field is missing,
 /// or the digest computation fails.
 pub fn compute_said(
-    sad: &mut serde_json::Value,
+    sad: &mut crate::sad::SadValue,
     label: &str,
     code: &str,
     kind: SerializationKind,
@@ -71,11 +71,11 @@ pub fn compute_said(
     };
 
     // Replace label field with dummy
-    obj.insert(label.into(), serde_json::Value::String(dummy.clone()));
+    obj.insert(label.into(), crate::sad::SadValue::String(dummy.clone()));
 
     // If self-addressing, also replace `i` with dummy
     if is_self_addressing {
-        obj.insert("i".into(), serde_json::Value::String(dummy.clone()));
+        obj.insert("i".into(), crate::sad::SadValue::String(dummy.clone()));
     }
 
     // Serialize with the dummies in place
@@ -90,9 +90,9 @@ pub fn compute_said(
         .as_object_mut()
         .ok_or_else(|| CoreError::Validation("SAD must be a JSON object".into()))?;
 
-    obj.insert(label.into(), serde_json::Value::String(said.clone()));
+    obj.insert(label.into(), crate::sad::SadValue::String(said.clone()));
     if is_self_addressing {
-        obj.insert("i".into(), serde_json::Value::String(said.clone()));
+        obj.insert("i".into(), crate::sad::SadValue::String(said.clone()));
     }
 
     Ok(said)
@@ -103,7 +103,7 @@ pub fn compute_said(
 /// # Errors
 /// Returns `CoreError::SaidMismatch` if the digest does not match.
 pub fn verify_said(
-    sad: &serde_json::Value,
+    sad: &crate::sad::SadValue,
     label: &str,
     code: &str,
     kind: SerializationKind,
@@ -131,7 +131,10 @@ pub fn verify_said(
 }
 
 /// Serialize a SAD value according to the specified serialization kind.
-fn serialize_sad(sad: &serde_json::Value, kind: SerializationKind) -> Result<Vec<u8>, CoreError> {
+fn serialize_sad(
+    sad: &crate::sad::SadValue,
+    kind: SerializationKind,
+) -> Result<Vec<u8>, CoreError> {
     match kind {
         SerializationKind::Json => serde_json::to_vec(sad).map_err(CoreError::Json),
         SerializationKind::Cbor => {
@@ -151,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_compute_said_basic() {
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "d": "",
             "msg": "hello world"
         });
@@ -169,7 +172,7 @@ mod tests {
     #[test]
     fn test_compute_said_self_addressing() {
         // When d == i, both should be replaced with the computed SAID
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -187,7 +190,7 @@ mod tests {
     fn test_compute_said_deterministic() {
         // Same input should produce the same SAID
         let make_sad = || {
-            serde_json::json!({
+            crate::sad!({
                 "d": "",
                 "x": "test"
             })
@@ -204,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_verify_said_valid() {
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "d": "",
             "x": "verify me"
         });
@@ -217,7 +220,7 @@ mod tests {
 
     #[test]
     fn test_verify_said_tampered() {
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "d": "",
             "x": "verify me"
         });
@@ -225,7 +228,7 @@ mod tests {
         compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
 
         // Tamper with the data
-        sad["x"] = serde_json::Value::String("tampered".into());
+        sad["x"] = crate::sad::SadValue::String("tampered".into());
 
         // Verification should fail
         let result = verify_said(&sad, "d", "E", SerializationKind::Json);
@@ -234,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_compute_said_missing_field() {
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "x": "no d field"
         });
 
@@ -244,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_compute_said_not_object() {
-        let mut sad = serde_json::json!("not an object");
+        let mut sad = crate::sad!("not an object");
         let result = compute_said(&mut sad, "d", "E", SerializationKind::Json);
         assert!(result.is_err());
     }
@@ -252,7 +255,7 @@ mod tests {
     #[test]
     fn test_compute_said_different_algorithms() {
         let make_sad = || {
-            serde_json::json!({
+            crate::sad!({
                 "d": "",
                 "x": "test"
             })

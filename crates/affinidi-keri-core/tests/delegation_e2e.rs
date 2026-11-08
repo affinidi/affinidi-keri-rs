@@ -14,7 +14,6 @@ use affinidi_keri_core::said;
 use affinidi_keri_core::serder::Serder;
 use affinidi_keri_core::version::SerializationKind;
 use affinidi_keri_crypto::{Diger, Signer, Verfer};
-use serde_json::json;
 
 const DELEGATOR: &str = "EDelegator00000000000000000000000000000000AB";
 const ANCHOR_SAID: &str = "EAnchorEvent000000000000000000000000000000AB";
@@ -33,22 +32,22 @@ fn next_key_digest(s: &Signer) -> String {
 
 /// Fix the `v` field size before computing the SAID, so the SAID covers the
 /// bytes the event will actually be serialized as.
-fn fix_version_string(sad: &mut serde_json::Value) {
+fn fix_version_string(sad: &mut affinidi_keri_core::SadValue) {
     let placeholder = "#".repeat(44);
     let self_addressing = sad.get("d") == sad.get("i");
     let (d, i) = (sad["d"].clone(), sad["i"].clone());
-    sad["d"] = json!(placeholder);
+    sad["d"] = affinidi_keri_core::sad!(placeholder);
     if self_addressing {
-        sad["i"] = json!(placeholder);
+        sad["i"] = affinidi_keri_core::sad!(placeholder);
     }
     let len = serde_json::to_vec(sad).expect("serialize").len();
-    sad["v"] = json!(format!("KERI10JSON{len:06x}_"));
+    sad["v"] = affinidi_keri_core::sad!(format!("KERI10JSON{len:06x}_"));
     sad["d"] = d;
     sad["i"] = i;
 }
 
 fn delegated_inception(current: &Signer, next: &Signer, delegator: &str) -> Serder {
-    let mut sad = json!({
+    let mut sad = affinidi_keri_core::sad!({
         "v": "KERI10JSON000000_",
         "t": "dip",
         "d": "",
@@ -77,7 +76,7 @@ fn delegated_rotation(
     next: &Signer,
     delegator: &str,
 ) -> Serder {
-    let mut sad = json!({
+    let mut sad = affinidi_keri_core::sad!({
         "v": "KERI10JSON000000_",
         "t": "drt",
         "d": "",
@@ -117,13 +116,15 @@ fn proof() -> DelegationProof {
 
 /// A delegator whose verified KEL anchors exactly the seals it is given.
 struct Delegator {
-    seals: Vec<serde_json::Value>,
+    seals: Vec<affinidi_keri_core::SadValue>,
 }
 
 impl Delegator {
     fn anchoring(prefix: &str, sn: u64, said: &str) -> Self {
         Self {
-            seals: vec![json!({ "i": prefix, "s": format!("{sn:x}"), "d": said })],
+            seals: vec![
+                affinidi_keri_core::sad!({ "i": prefix, "s": format!("{sn:x}"), "d": said }),
+            ],
         }
     }
 
@@ -138,7 +139,7 @@ impl DelegatorAnchors for Delegator {
         _delegator: &str,
         _sn: u64,
         _said: &str,
-    ) -> Result<Option<Vec<serde_json::Value>>, CoreError> {
+    ) -> Result<Option<Vec<affinidi_keri_core::SadValue>>, CoreError> {
         Ok(Some(self.seals.clone()))
     }
 }
@@ -152,7 +153,7 @@ impl DelegatorAnchors for NoSuchEvent {
         _delegator: &str,
         _sn: u64,
         _said: &str,
-    ) -> Result<Option<Vec<serde_json::Value>>, CoreError> {
+    ) -> Result<Option<Vec<affinidi_keri_core::SadValue>>, CoreError> {
         Ok(None)
     }
 }

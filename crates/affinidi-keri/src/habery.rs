@@ -96,7 +96,7 @@ impl Habery {
     pub fn interact(
         &mut self,
         name: &str,
-        anchors: &[serde_json::Value],
+        anchors: &[affinidi_keri_core::SadValue],
     ) -> Result<Vec<u8>, KeriError> {
         let hab = self
             .habs
@@ -192,7 +192,7 @@ mod tests {
         let icp_config = InceptionConfig::default();
         habery.incept("alice", &icp_config).unwrap();
 
-        let anchor = serde_json::json!({"d": "ETestDigest_____________________________"});
+        let anchor = affinidi_keri_core::sad!({"d": "ETestDigest_____________________________"});
         let ixn_msg = habery.interact("alice", &[anchor]).unwrap();
         assert!(!ixn_msg.is_empty());
 

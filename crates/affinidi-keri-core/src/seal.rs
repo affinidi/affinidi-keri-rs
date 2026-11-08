@@ -67,6 +67,22 @@ pub enum Seal {
 
 impl Seal {
     /// Convert this seal to a JSON value.
+    /// The seal as an ordered [`SadValue`](crate::sad::SadValue), fields in
+    /// the order KERI writes them. Use this to put a seal in an event.
+    ///
+    /// # Errors
+    /// Returns an error if the seal cannot be serialized.
+    pub fn to_sad(&self) -> Result<crate::sad::SadValue, serde_json::Error> {
+        match self {
+            Seal::Digest(s) => crate::sad::SadValue::from_serialize(s),
+            Seal::Root(s) => crate::sad::SadValue::from_serialize(s),
+            Seal::Event(s) => crate::sad::SadValue::from_serialize(s),
+            Seal::Location(s) => crate::sad::SadValue::from_serialize(s),
+        }
+    }
+
+    /// The seal as a `serde_json::Value`. Its member order depends on how
+    /// `serde_json` was built; use [`Seal::to_sad`] to put a seal in an event.
     pub fn to_json_value(&self) -> Result<serde_json::Value, serde_json::Error> {
         match self {
             Seal::Digest(s) => serde_json::to_value(s),

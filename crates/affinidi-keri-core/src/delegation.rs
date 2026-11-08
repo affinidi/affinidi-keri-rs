@@ -102,7 +102,7 @@ pub trait DelegatorAnchors {
         delegator: &str,
         sn: u64,
         said: &str,
-    ) -> Result<Option<Vec<serde_json::Value>>, CoreError>;
+    ) -> Result<Option<Vec<crate::sad::SadValue>>, CoreError>;
 }
 
 /// Verify that `delegator` authorised the delegated event identified by
@@ -143,7 +143,7 @@ pub fn verify_delegation(
     let expected_sn = format!("{sn:x}");
 
     let matched = anchors.iter().any(|anchor| {
-        serde_json::from_value::<SealEvent>(anchor.clone()).is_ok_and(|seal| {
+        anchor.deserialize_into::<SealEvent>().is_ok_and(|seal| {
             seal.prefix == delegatee && seal.digest == said && seal.sn == expected_sn
         })
     });
@@ -162,13 +162,12 @@ pub fn verify_delegation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     const DELEGATOR: &str = "EDelegatorPrefix000000000000000000000000000";
     const DELEGATEE: &str = "EDelegateePrefix000000000000000000000000000";
     const EVENT_SAID: &str = "EDelegatedEventSaid00000000000000000000000000";
 
-    struct Anchors(Option<Vec<serde_json::Value>>);
+    struct Anchors(Option<Vec<crate::sad::SadValue>>);
 
     impl DelegatorAnchors for Anchors {
         fn anchors_at(
@@ -176,7 +175,7 @@ mod tests {
             _delegator: &str,
             _sn: u64,
             _said: &str,
-        ) -> Result<Option<Vec<serde_json::Value>>, CoreError> {
+        ) -> Result<Option<Vec<crate::sad::SadValue>>, CoreError> {
             Ok(self.0.clone())
         }
     }
@@ -188,8 +187,8 @@ mod tests {
         }
     }
 
-    fn seal(prefix: &str, sn: &str, digest: &str) -> serde_json::Value {
-        json!({ "i": prefix, "s": sn, "d": digest })
+    fn seal(prefix: &str, sn: &str, digest: &str) -> crate::sad::SadValue {
+        crate::sad!({ "i": prefix, "s": sn, "d": digest })
     }
 
     #[test]
@@ -202,7 +201,7 @@ mod tests {
     #[test]
     fn accepts_a_seal_among_others() {
         let source = Anchors(Some(vec![
-            json!({ "d": "ESomeDigestSeal000000000000000000000000000000" }),
+            crate::sad!({ "d": "ESomeDigestSeal000000000000000000000000000000" }),
             seal(
                 "EOtherPrefix00000000000000000000000000000000",
                 "0",

@@ -179,7 +179,7 @@ fn an_acdc_followed_by_a_key_event_still_parses() {
     // The published artifact hides this because its ACDC happens to be last.
     // Streams of this shape are ordinary: a credential followed by further key
     // events, which is every vLEI chain.
-    let mut sad = serde_json::json!({
+    let mut sad = affinidi_keri_core::sad!({
         "v": "KERI10JSON000000_",
         "t": "rev",
         "d": "ERevocation000000000000000000000000000000000",
@@ -189,7 +189,7 @@ fn an_acdc_followed_by_a_key_event_still_parses() {
         "dt": "2024-01-01T00:00:00.000000+00:00",
     });
     let len = serde_json::to_vec(&sad).expect("serializes").len();
-    sad["v"] = serde_json::json!(format!("KERI10JSON{len:06x}_"));
+    sad["v"] = affinidi_keri_core::sad!(format!("KERI10JSON{len:06x}_"));
 
     let mut stream = ARTIFACT.to_vec();
     stream.extend_from_slice(&serde_json::to_vec(&sad).expect("serializes"));

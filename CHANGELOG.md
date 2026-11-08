@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-09
+
+### Changed (breaking)
+
+- **These crates no longer turn on `serde_json`'s `preserve_order` for your
+  whole build.** They needed it because KERI field order is part of a
+  message, and `serde_json::Value` keeps member order only with that feature.
+  But cargo unifies features, so depending on these crates changed how
+  `serde_json` behaved for every crate a consumer compiled: maps became
+  insertion-ordered and every `Value` grew. In a downstream service that
+  broke request hashes and page cursors that relied on sorted keys, and
+  pushed a task past its 512 KiB worker-stack budget.
+
+  Order is now kept by a type of our own, whatever features `serde_json` was
+  built with:
+
+  - `affinidi_keri_core::sad::SadValue` (re-exported as `SadValue`, with
+    `SadMap`): an order-preserving JSON value whose read API mirrors
+    `serde_json::Value`. Parsing keeps the order the bytes had; serializing
+    writes members in that order.
+  - `sad!`: build one with `json!` syntax. Interpolated values go through the
+    `ToSad` trait, which is deliberately not implemented for
+    `serde_json::Value`.
+  - `Serder::new`, `Serder::sad`, `Serder::take_sad`, `said::compute_said`,
+    `said::verify_said`, `Kever::new_from_parts` and
+    `Kever::verify_update_owned` take or return `SadValue`.
+    `Serder::from_json_value` is now `Serder::from_sad`.
+  - Event structs' `anchors`, `DelegatorAnchors::anchors_at`, and the anchors
+    `Hab::interact` and its siblings take are `SadValue`. `Seal::to_sad`
+    gives a seal in KERI order.
+
+  To migrate: replace `serde_json::json!` with `affinidi_keri_core::sad!`
+  where you build a message, and `serde_json::from_value(serder.sad().clone())`
+  with `serder.sad().deserialize_into()`. To read a SAD as a
+  `serde_json::Value`, use `SadValue::to_json_value`.
+
+  If your build still needs `preserve_order` for its own reasons, turn it on
+  in your own manifest; these crates behave the same either way.
+
 ## [0.4.1] - 2026-11-09
 
 ### Security

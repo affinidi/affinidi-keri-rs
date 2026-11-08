@@ -65,7 +65,7 @@ pub struct Hab {
 /// We temporarily set `d` (and `i` for self-addressing inception) to 44-char
 /// placeholders, serialize to compute the correct size, update `v`, then
 /// restore the original values so `compute_said` can run normally.
-fn fix_version_string(sad: &mut serde_json::Value) -> Result<(), KeriError> {
+fn fix_version_string(sad: &mut affinidi_keri_core::SadValue) -> Result<(), KeriError> {
     let placeholder = "#".repeat(44); // Blake3-256 qb64 length
     let is_self_addressing = sad.get("d") == sad.get("i");
 
@@ -74,14 +74,14 @@ fn fix_version_string(sad: &mut serde_json::Value) -> Result<(), KeriError> {
     let orig_i = sad["i"].clone();
 
     // Set placeholders to compute correct size
-    sad["d"] = serde_json::Value::String(placeholder.clone());
+    sad["d"] = affinidi_keri_core::SadValue::String(placeholder.clone());
     if is_self_addressing {
-        sad["i"] = serde_json::Value::String(placeholder);
+        sad["i"] = affinidi_keri_core::SadValue::String(placeholder);
     }
 
     let temp_raw = serde_json::to_vec(sad)
         .map_err(|e| KeriError::Core(affinidi_keri_core::CoreError::Json(e)))?;
-    sad["v"] = serde_json::Value::String(format!("KERI10JSON{:06x}_", temp_raw.len()));
+    sad["v"] = affinidi_keri_core::SadValue::String(format!("KERI10JSON{:06x}_", temp_raw.len()));
 
     // Restore originals for compute_said
     sad["d"] = orig_d;
@@ -228,7 +228,7 @@ impl Hab {
             .collect::<Result<Vec<_>, _>>()?;
 
         // Build inception SAD with proper field ordering
-        let mut sad = serde_json::json!({
+        let mut sad = affinidi_keri_core::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -407,7 +407,7 @@ impl Hab {
             .collect::<Result<Vec<_>, _>>()?;
 
         // Build rotation SAD
-        let mut sad = serde_json::json!({
+        let mut sad = affinidi_keri_core::sad!({
             "v": "KERI10JSON000000_",
             "t": "rot",
             "d": "",
@@ -571,7 +571,7 @@ impl Hab {
     /// (seals) into the KEL.
     pub fn interact(
         &mut self,
-        anchors: &[serde_json::Value],
+        anchors: &[affinidi_keri_core::SadValue],
         store: &dyn KeriStore,
     ) -> Result<Vec<u8>, KeriError> {
         self.interact_inner(anchors, Some(store))
@@ -584,20 +584,20 @@ impl Hab {
     /// Returns [`KeriError`] if the event cannot be built or signed.
     pub fn interact_event(
         &mut self,
-        anchors: &[serde_json::Value],
+        anchors: &[affinidi_keri_core::SadValue],
     ) -> Result<SignedEvent, KeriError> {
         self.interact_inner(anchors, None)
     }
 
     fn interact_inner(
         &mut self,
-        anchors: &[serde_json::Value],
+        anchors: &[affinidi_keri_core::SadValue],
         store: Option<&dyn KeriStore>,
     ) -> Result<SignedEvent, KeriError> {
         let new_sn = self.sn + 1;
 
         // Build interaction SAD
-        let mut sad = serde_json::json!({
+        let mut sad = affinidi_keri_core::sad!({
             "v": "KERI10JSON000000_",
             "t": "ixn",
             "d": "",
@@ -714,7 +714,7 @@ impl Hab {
         let other_said = other_serder.said()?;
 
         // Build receipt event SAD
-        let mut sad = serde_json::json!({
+        let mut sad = affinidi_keri_core::sad!({
             "v": "KERI10JSON000000_",
             "t": "rct",
             "d": "",
@@ -891,6 +891,34 @@ mod tests {
         serder.verify_said("E").unwrap();
     }
 
+    /// KERI fixes the order of an event's fields, and keripy refuses one out
+    /// of order. Construction must emit it whatever `serde_json` was built
+    /// with.
+    #[test]
+    fn events_are_built_in_keri_field_order() {
+        fn keys(v: &affinidi_keri_core::SadValue) -> Vec<&str> {
+            v.as_object().unwrap().keys().map(String::as_str).collect()
+        }
+        let store = temp_store();
+        let config = InceptionConfig::default();
+        let (mut hab, msg) = Hab::incept("order", &config, &store).unwrap();
+        let icp = Serder::from_raw(&msg[..]).unwrap();
+        assert!(icp.raw().starts_with(br#"{"v":"KERI10JSON"#));
+        assert_eq!(
+            keys(icp.sad()),
+            [
+                "v", "t", "d", "i", "s", "kt", "k", "nt", "n", "bt", "b", "c", "a"
+            ]
+        );
+
+        let seal =
+            affinidi_keri_core::sad!({"i": hab.prefix(), "s": "0", "d": icp.said().unwrap()});
+        let msg = hab.interact(&[seal], &store).unwrap();
+        let ixn = Serder::from_raw(&msg[..]).unwrap();
+        assert_eq!(keys(ixn.sad()), ["v", "t", "d", "i", "s", "p", "a"]);
+        assert_eq!(keys(&ixn.sad()["a"][0]), ["i", "s", "d"]);
+    }
+
     #[test]
     fn test_hab_rotate() {
         let store = temp_store();
@@ -928,7 +956,7 @@ mod tests {
         let config = InceptionConfig::builder().salt(vec![0x01u8; 16]).build();
         let (mut hab, _) = Hab::incept("alice", &config, &store).unwrap();
 
-        let anchor = serde_json::json!({"d": "ETestDigest_____________________________"});
+        let anchor = affinidi_keri_core::sad!({"d": "ETestDigest_____________________________"});
         let ixn_msg = hab.interact(&[anchor], &store).unwrap();
 
         assert_eq!(hab.sn(), 1);
