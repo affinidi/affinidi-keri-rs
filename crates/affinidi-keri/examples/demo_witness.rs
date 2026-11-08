@@ -316,7 +316,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("── Step 6: Interaction Event with Witness Receipts ──");
     println!();
 
-    let anchor = serde_json::json!({
+    let anchor = affinidi_keri_core::sad!({
         "d": "EAnchored_data_digest_placeholder_______"
     });
     let ixn_msg = ctrl.interact(&[anchor], &ctrl_store)?;
@@ -342,7 +342,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Create another interaction but only provide 1 witness receipt
-    let anchor2 = serde_json::json!({"d": "ESecondAnchor___________________________"});
+    let anchor2 = affinidi_keri_core::sad!({"d": "ESecondAnchor___________________________"});
     let ixn2_msg = ctrl.interact(&[anchor2], &ctrl_store)?;
     let ixn2_serder = Serder::from_raw(&ixn2_msg)?;
 

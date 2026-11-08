@@ -313,7 +313,7 @@ mod tests {
         let rot_msg = hab.rotate(&rot_config, &creator_store).unwrap();
 
         // Interact with anchor
-        let anchor = serde_json::json!({"d": "ETestDigest_____________________________"});
+        let anchor = affinidi_keri_core::sad!({"d": "ETestDigest_____________________________"});
         let ixn_msg = hab.interact(&[anchor], &creator_store).unwrap();
 
         // Receiver processes all three events

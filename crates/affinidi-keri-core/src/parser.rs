@@ -711,7 +711,7 @@ mod tests {
 
     #[test]
     fn test_parse_next_json_no_attachments() {
-        let sad = serde_json::json!({
+        let sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -752,7 +752,7 @@ mod tests {
             .qb64()
             .unwrap();
 
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -797,7 +797,7 @@ mod tests {
             .qb64()
             .unwrap();
 
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -840,7 +840,7 @@ mod tests {
     fn test_non_ascii_attachment_returns_error() {
         // Build a valid JSON event body, then append a counter + non-ASCII bytes.
         // This reproduces the PoC: a -D counter followed by multi-byte UTF-8.
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",

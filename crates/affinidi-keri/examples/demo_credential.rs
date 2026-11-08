@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let verfer = issuer.signers()[0].verfer();
     let verfer_qb64 = verfer.qb64()?;
 
-    let did_document = serde_json::json!({
+    let did_document = affinidi_keri_core::sad!({
         "@context": [
             "https://www.w3.org/ns/did/v1",
             "https://w3id.org/security/suites/ed25519-2020/v1"
@@ -130,7 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ACDC = Authentic Chained Data Container (KERI-native verifiable credential)
 
     // First, build the attributes block with its own SAID
-    let mut attributes = serde_json::json!({
+    let mut attributes = affinidi_keri_core::sad!({
         "d": "",
         "i": holder.prefix(),
         "dt": "2026-03-04T12:00:00Z",
@@ -141,7 +141,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     said::compute_said(&mut attributes, "d", "E", SerializationKind::Json)?;
 
     // Build the credential envelope
-    let mut credential = serde_json::json!({
+    let mut credential = affinidi_keri_core::sad!({
         "v": "ACDC10JSON000000_",
         "d": "",
         "i": issuer.prefix(),
@@ -151,10 +151,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Fix version string size (same technique as event SAID computation)
     let placeholder = "#".repeat(44);
-    credential["d"] = serde_json::Value::String(placeholder);
+    credential["d"] = affinidi_keri_core::SadValue::String(placeholder);
     let temp_raw = serde_json::to_vec(&credential)?;
-    credential["v"] = serde_json::Value::String(format!("ACDC10JSON{:06x}_", temp_raw.len()));
-    credential["d"] = serde_json::Value::String(String::new());
+    credential["v"] =
+        affinidi_keri_core::SadValue::String(format!("ACDC10JSON{:06x}_", temp_raw.len()));
+    credential["d"] = affinidi_keri_core::SadValue::String(String::new());
 
     // Compute the credential's SAID
     let credential_said = said::compute_said(&mut credential, "d", "E", SerializationKind::Json)?;
@@ -172,7 +173,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 5: Anchor the Credential in the Issuer's KEL
     // ─────────────────────────────────────────────────────────────────────
     // An interaction event (ixn) anchors the credential's SAID as a seal
-    let seal = serde_json::json!({
+    let seal = affinidi_keri_core::sad!({
         "i": &credential_said,
         "s": "0",
         "d": &credential_said

@@ -96,7 +96,7 @@ fn test_witness_full_lifecycle() {
     assert_eq!(kevers[ctrl.prefix()].sn(), 1);
 
     // ─── Interaction: witnesses receipt, verifier processes ───
-    let anchor = serde_json::json!({"d": "ETestDigest_____________________________"});
+    let anchor = affinidi_keri_core::sad!({"d": "ETestDigest_____________________________"});
     let ixn_msg = ctrl.interact(&[anchor], &ctrl_store).unwrap();
     assert_eq!(ctrl.sn(), 2);
 

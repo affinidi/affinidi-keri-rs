@@ -147,7 +147,7 @@ mod tests {
             .qb64()
             .unwrap();
 
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",

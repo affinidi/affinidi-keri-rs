@@ -86,7 +86,7 @@ fn a_resumed_identifier_produces_the_same_interaction() {
     let mut continuous = incept();
     let mut resumed = Hab::resume(&incept().state(), SALT).expect("resume");
 
-    let anchors = vec![serde_json::json!({"d": "EAnchor"})];
+    let anchors = vec![affinidi_keri_core::sad!({"d": "EAnchor"})];
     let a = continuous.interact_event(&anchors).expect("interact");
     let b = resumed.interact_event(&anchors).expect("interact");
 
@@ -115,7 +115,7 @@ fn a_resumed_identifier_interacts_correctly_after_rotation() {
 
     let mut resumed = Hab::resume(&interrupted.state(), SALT).expect("resume");
 
-    let anchors = vec![serde_json::json!({"d": "EAnchor"})];
+    let anchors = vec![affinidi_keri_core::sad!({"d": "EAnchor"})];
     let a = continuous.interact_event(&anchors).expect("interact");
     let b = resumed.interact_event(&anchors).expect("interact");
 

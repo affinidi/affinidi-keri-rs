@@ -256,7 +256,7 @@ mod tests {
     use crate::version::SerializationKind;
 
     fn make_test_serder(ilk: &str, prefix: &str, sn: u64) -> Serder {
-        let sad = serde_json::json!({
+        let sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": ilk,
             "d": "",

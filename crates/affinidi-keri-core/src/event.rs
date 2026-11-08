@@ -54,7 +54,7 @@ pub struct InceptionEvent {
     pub config: Vec<String>,
     /// Anchored data seals.
     #[serde(rename = "a")]
-    pub anchors: Vec<serde_json::Value>,
+    pub anchors: Vec<crate::sad::SadValue>,
 }
 
 /// Rotation event body.
@@ -106,7 +106,7 @@ pub struct RotationEvent {
     pub config: Vec<String>,
     /// Anchored data seals.
     #[serde(rename = "a")]
-    pub anchors: Vec<serde_json::Value>,
+    pub anchors: Vec<crate::sad::SadValue>,
 }
 
 /// Interaction event body.
@@ -134,7 +134,7 @@ pub struct InteractionEvent {
     pub prior_said: String,
     /// Anchored data seals.
     #[serde(rename = "a")]
-    pub anchors: Vec<serde_json::Value>,
+    pub anchors: Vec<crate::sad::SadValue>,
 }
 
 /// Delegated inception event body.
@@ -186,7 +186,7 @@ pub struct DelegatedInceptionEvent {
     pub config: Vec<String>,
     /// Anchored data seals.
     #[serde(rename = "a")]
-    pub anchors: Vec<serde_json::Value>,
+    pub anchors: Vec<crate::sad::SadValue>,
     /// Delegator identifier prefix.
     #[serde(rename = "di")]
     pub delegator: String,
@@ -242,7 +242,7 @@ pub struct DelegatedRotationEvent {
     pub config: Vec<String>,
     /// Anchored data seals.
     #[serde(rename = "a")]
-    pub anchors: Vec<serde_json::Value>,
+    pub anchors: Vec<crate::sad::SadValue>,
     /// Delegator identifier prefix.
     #[serde(rename = "di")]
     pub delegator: String,

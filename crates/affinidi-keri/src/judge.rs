@@ -319,7 +319,7 @@ mod tests {
     fn test_judge_accepts_interaction() {
         let (mut hab, icp_msg, hab_store) = make_hab("alice", [0x01; 16]);
 
-        let anchor = serde_json::json!({"d": "ETestDigest_____________________________"});
+        let anchor = affinidi_keri_core::sad!({"d": "ETestDigest_____________________________"});
         let ixn_msg = hab.interact(&[anchor], hab_store.as_ref()).unwrap();
 
         let judge_store = temp_store();
@@ -348,8 +348,8 @@ mod tests {
         assert_eq!(hab1.prefix(), hab2.prefix());
 
         // Each produces a different ixn at sn=1
-        let anchor_a = serde_json::json!({"d": "EAnchorA_document_hash_AAAAAAAAAAAAA"});
-        let anchor_b = serde_json::json!({"d": "EAnchorB_document_hash_BBBBBBBBBBBBB"});
+        let anchor_a = affinidi_keri_core::sad!({"d": "EAnchorA_document_hash_AAAAAAAAAAAAA"});
+        let anchor_b = affinidi_keri_core::sad!({"d": "EAnchorB_document_hash_BBBBBBBBBBBBB"});
         let ixn_a = hab1.interact(&[anchor_a], hab1_store.as_ref()).unwrap();
         let ixn_b = hab2.interact(&[anchor_b], hab2_store.as_ref()).unwrap();
 
@@ -410,8 +410,8 @@ mod tests {
         assert_eq!(judge.verdict(&prefix), Verdict::Trusted);
 
         // After duplicity
-        let anchor_a = serde_json::json!({"d": "EAnchorA_document_hash_AAAAAAAAAAAAA"});
-        let anchor_b = serde_json::json!({"d": "EAnchorB_document_hash_BBBBBBBBBBBBB"});
+        let anchor_a = affinidi_keri_core::sad!({"d": "EAnchorA_document_hash_AAAAAAAAAAAAA"});
+        let anchor_b = affinidi_keri_core::sad!({"d": "EAnchorB_document_hash_BBBBBBBBBBBBB"});
         let ixn_a = hab1.interact(&[anchor_a], hab1_store.as_ref()).unwrap();
         let ixn_b = hab2.interact(&[anchor_b], hab2_store.as_ref()).unwrap();
 
@@ -431,8 +431,8 @@ mod tests {
 
         judge.process(&icp_msg).unwrap();
 
-        let anchor_a = serde_json::json!({"d": "EAnchorA_document_hash_AAAAAAAAAAAAA"});
-        let anchor_b = serde_json::json!({"d": "EAnchorB_document_hash_BBBBBBBBBBBBB"});
+        let anchor_a = affinidi_keri_core::sad!({"d": "EAnchorA_document_hash_AAAAAAAAAAAAA"});
+        let anchor_b = affinidi_keri_core::sad!({"d": "EAnchorB_document_hash_BBBBBBBBBBBBB"});
         let ixn_a = hab1.interact(&[anchor_a], hab1_store.as_ref()).unwrap();
         let ixn_b = hab2.interact(&[anchor_b], hab2_store.as_ref()).unwrap();
 
@@ -472,13 +472,13 @@ mod tests {
         // Trigger duplicity at sn=1
         let ixn_a = hab1
             .interact(
-                &[serde_json::json!({"d": "EAnchorA_document_hash_AAAAAAAAAAAAA"})],
+                &[affinidi_keri_core::sad!({"d": "EAnchorA_document_hash_AAAAAAAAAAAAA"})],
                 hab1_store.as_ref(),
             )
             .unwrap();
         let ixn_b = hab2
             .interact(
-                &[serde_json::json!({"d": "EAnchorB_document_hash_BBBBBBBBBBBBB"})],
+                &[affinidi_keri_core::sad!({"d": "EAnchorB_document_hash_BBBBBBBBBBBBB"})],
                 hab2_store.as_ref(),
             )
             .unwrap();
@@ -490,7 +490,7 @@ mod tests {
         // Further events from either fork must be rejected
         let ixn_c = hab1
             .interact(
-                &[serde_json::json!({"d": "EAnchorC_document_hash_CCCCCCCCCCCCC"})],
+                &[affinidi_keri_core::sad!({"d": "EAnchorC_document_hash_CCCCCCCCCCCCC"})],
                 hab1_store.as_ref(),
             )
             .unwrap();

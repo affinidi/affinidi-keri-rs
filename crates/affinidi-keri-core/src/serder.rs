@@ -21,7 +21,7 @@ pub struct Serder {
     /// The serialization kind (JSON, CBOR, or MessagePack).
     kind: SerializationKind,
     /// The parsed JSON value (the SAD).
-    sad: serde_json::Value,
+    sad: crate::sad::SadValue,
 }
 
 impl Serder {
@@ -32,12 +32,13 @@ impl Serder {
     /// 2. Embeds the version string with the computed size.
     /// 3. Stores the raw bytes.
     ///
-    /// The SAD should already have proper field ordering. A version string
+    /// The message is written in the SAD's member order, which is the order
+    /// KERI requires: build it with [`sad!`](crate::sad!). A version string
     /// (`v` field) will be updated with the correct size.
     ///
     /// # Errors
     /// Returns `CoreError` if serialization fails.
-    pub fn new(kind: SerializationKind, mut sad: serde_json::Value) -> Result<Self, CoreError> {
+    pub fn new(kind: SerializationKind, mut sad: crate::sad::SadValue) -> Result<Self, CoreError> {
         // First pass: serialize to compute size
         let raw = serialize_value(&sad, kind)?;
 
@@ -60,7 +61,7 @@ impl Serder {
         if let Some(ref ver) = version {
             let vs = ver.to_version_string();
             if let Some(obj) = sad.as_object_mut() {
-                obj.insert("v".into(), serde_json::Value::String(vs));
+                obj.insert("v".into(), crate::sad::SadValue::String(vs));
             }
 
             // Re-serialize with the updated version string
@@ -72,7 +73,7 @@ impl Serder {
             let final_vs = final_ver.to_version_string();
 
             if let Some(obj) = sad.as_object_mut() {
-                obj.insert("v".into(), serde_json::Value::String(final_vs));
+                obj.insert("v".into(), crate::sad::SadValue::String(final_vs));
             }
 
             let raw = serialize_value(&sad, kind)?;
@@ -152,13 +153,11 @@ impl Serder {
         })
     }
 
-    /// Create a Serder from a JSON value (convenience wrapper).
-    ///
-    /// Serializes as JSON by default.
+    /// Create a Serder from an ordered SAD, serialized as JSON.
     ///
     /// # Errors
     /// Returns `CoreError` if the value is not a valid KERI message.
-    pub fn from_json_value(sad: serde_json::Value) -> Result<Self, CoreError> {
+    pub fn from_sad(sad: crate::sad::SadValue) -> Result<Self, CoreError> {
         Self::new(SerializationKind::Json, sad)
     }
 
@@ -178,7 +177,7 @@ impl Serder {
     }
 
     /// The parsed JSON SAD (Self-Addressing Data).
-    pub fn sad(&self) -> &serde_json::Value {
+    pub fn sad(&self) -> &crate::sad::SadValue {
         &self.sad
     }
 
@@ -218,14 +217,14 @@ impl Serder {
             .ok_or_else(|| CoreError::MissingField("s".into()))
     }
 
-    /// Take ownership of the parsed SAD, replacing it with `Value::Null`.
+    /// Take ownership of the parsed SAD, replacing it with
+    /// [`SadValue::Null`](crate::sad::SadValue::Null), to avoid a clone.
     ///
-    /// This allows downstream consumers to call `serde_json::from_value(sad)`
-    /// without cloning. The `raw()`, `ilk()`, `prefix()`, `sn()`, and `said()`
-    /// methods that read from `raw` will still work, but `sad()` will return
-    /// `&Value::Null` after this call.
-    pub fn take_sad(&mut self) -> serde_json::Value {
-        std::mem::replace(&mut self.sad, serde_json::Value::Null)
+    /// `raw()` still works afterwards, but `sad()` returns `Null` and the
+    /// field accessors (`ilk()`, `prefix()`, `sn()`, `said()`), which read
+    /// the SAD, fail.
+    pub fn take_sad(&mut self) -> crate::sad::SadValue {
+        std::mem::replace(&mut self.sad, crate::sad::SadValue::Null)
     }
 
     /// Verify the SAID of this message.
@@ -297,9 +296,9 @@ fn sniff_kind(data: &[u8]) -> Result<SerializationKind, CoreError> {
     }
 }
 
-/// Serialize a serde_json::Value to bytes in the specified format.
+/// Serialize a crate::sad::SadValue to bytes in the specified format.
 fn serialize_value(
-    value: &serde_json::Value,
+    value: &crate::sad::SadValue,
     kind: SerializationKind,
 ) -> Result<Vec<u8>, CoreError> {
     match kind {
@@ -315,8 +314,11 @@ fn serialize_value(
     }
 }
 
-/// Deserialize bytes to a serde_json::Value from the specified format.
-fn deserialize_value(data: &[u8], kind: SerializationKind) -> Result<serde_json::Value, CoreError> {
+/// Deserialize bytes to a crate::sad::SadValue from the specified format.
+fn deserialize_value(
+    data: &[u8],
+    kind: SerializationKind,
+) -> Result<crate::sad::SadValue, CoreError> {
     match kind {
         SerializationKind::Json => serde_json::from_slice(data).map_err(CoreError::Json),
         SerializationKind::Cbor => {
@@ -334,7 +336,7 @@ mod tests {
 
     #[test]
     fn test_serder_new_json() {
-        let sad = serde_json::json!({
+        let sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -364,7 +366,7 @@ mod tests {
     #[test]
     fn test_serder_from_raw_json() {
         // Create a valid one with correct size
-        let sad = serde_json::json!({
+        let sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -385,7 +387,7 @@ mod tests {
 
     #[test]
     fn test_serder_from_json_value() {
-        let sad = serde_json::json!({
+        let sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "rot",
             "d": "SAID",
@@ -393,7 +395,7 @@ mod tests {
             "s": "1"
         });
 
-        let serder = Serder::from_json_value(sad).unwrap();
+        let serder = Serder::from_sad(sad).unwrap();
         assert_eq!(serder.ilk().unwrap(), "rot");
         assert_eq!(serder.prefix().unwrap(), "PREFIX");
         assert_eq!(serder.sn().unwrap(), 1);
@@ -402,7 +404,7 @@ mod tests {
 
     #[test]
     fn test_serder_version_size_correct() {
-        let sad = serde_json::json!({
+        let sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -426,7 +428,7 @@ mod tests {
 
     #[test]
     fn test_serder_roundtrip() {
-        let sad = serde_json::json!({
+        let sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "ixn",
             "d": "DIGEST",
@@ -452,7 +454,7 @@ mod tests {
 
     #[test]
     fn test_serder_missing_fields() {
-        let sad = serde_json::json!({
+        let sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "x": "no standard fields"
         });
@@ -488,5 +490,33 @@ mod tests {
     #[test]
     fn test_sniff_kind_unknown() {
         assert!(sniff_kind(&[0x00]).is_err());
+    }
+
+    /// Field order is part of a KERI message. These events are keripy's, from
+    /// the did:webs reference implementation; neither is in alphabetical
+    /// order (nor is the ixn's seal, `i`, `s`, `d`), so they verify only if
+    /// parsing keeps the order the bytes had, whatever features `serde_json`
+    /// was built with.
+    #[test]
+    fn a_keripy_event_out_of_alphabetical_order_verifies_and_round_trips() {
+        let stream: &[u8] = include_bytes!("../tests/fixtures/did-webs-ENro7uf0.keri.cesr");
+        let ixn_at = stream
+            .windows(5)
+            .enumerate()
+            .skip(1)
+            .find(|(_, w)| *w == b"{\"v\":")
+            .map(|(i, _)| i)
+            .expect("a second event");
+        for (at, ilk) in [(0, "icp"), (ixn_at, "ixn")] {
+            let serder = Serder::from_raw(&stream[at..]).unwrap();
+            assert_eq!(serder.ilk().unwrap(), ilk);
+            serder.verify_said("E").unwrap();
+            let rewritten = serialize_value(serder.sad(), serder.kind()).unwrap();
+            assert_eq!(
+                rewritten,
+                serder.raw(),
+                "{ilk} was not written back as received"
+            );
+        }
     }
 }

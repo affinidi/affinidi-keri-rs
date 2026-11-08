@@ -56,8 +56,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Each device creates a DIFFERENT interaction event at sn=1
-    let anchor_a = serde_json::json!({"d": "EAnchorA_document_hash_AAAAAAAAAAAAA"});
-    let anchor_b = serde_json::json!({"d": "EAnchorB_document_hash_BBBBBBBBBBBBB"});
+    let anchor_a = affinidi_keri_core::sad!({"d": "EAnchorA_document_hash_AAAAAAAAAAAAA"});
+    let anchor_b = affinidi_keri_core::sad!({"d": "EAnchorB_document_hash_BBBBBBBBBBBBB"});
 
     let ixn_a = hab1.interact(&[anchor_a], &hab1_store)?;
     let ixn_b = hab2.interact(&[anchor_b], &hab2_store)?;

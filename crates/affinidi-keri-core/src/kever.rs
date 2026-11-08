@@ -59,8 +59,7 @@ impl Kever {
         serder.verify_said("E")?;
 
         // Parse the inception event from the SAD
-        let icp: InceptionEvent =
-            serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+        let icp: InceptionEvent = serder.sad().deserialize_into().map_err(CoreError::Json)?;
 
         // Validate keys match provided verfers
         if icp.keys.len() != verfers.len() {
@@ -128,7 +127,7 @@ impl Kever {
         serder.verify_said("E")?;
 
         let dip: DelegatedInceptionEvent =
-            serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+            serder.sad().deserialize_into().map_err(CoreError::Json)?;
 
         if dip.keys.len() != verfers.len() {
             return Err(CoreError::Validation(format!(
@@ -170,12 +169,12 @@ impl Kever {
 
     /// Create a new Kever from pre-parsed parts, taking ownership of the SAD.
     ///
-    /// Same validation as [`new`], but avoids cloning the JSON `Value` for
-    /// `serde_json::from_value`. Use when the caller has already consumed the
-    /// SAD from a `Serder` via [`Serder::take_sad`].
+    /// Same validation as [`new`], but avoids cloning the SAD. Use when the
+    /// caller has already consumed it from a `Serder` via
+    /// [`Serder::take_sad`].
     pub fn new_from_parts(
         raw: &[u8],
-        sad: serde_json::Value,
+        sad: crate::sad::SadValue,
         sigs: &[Siger],
         verfers: &[Verfer],
     ) -> Result<Self, CoreError> {
@@ -192,7 +191,7 @@ impl Kever {
         // Verify SAID integrity before trusting any event fields
         said::verify_said(&sad, "d", "E", SerializationKind::Json)?;
 
-        let icp: InceptionEvent = serde_json::from_value(sad).map_err(CoreError::Json)?;
+        let icp: InceptionEvent = sad.deserialize_into().map_err(CoreError::Json)?;
 
         if icp.keys.len() != verfers.len() {
             return Err(CoreError::Validation(format!(
@@ -258,7 +257,7 @@ impl Kever {
             "rot" => {
                 self.reject_plain_rotation_when_delegated()?;
                 let rot: RotationEvent =
-                    serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+                    serder.sad().deserialize_into().map_err(CoreError::Json)?;
                 // A rotation is signed by the keys it INSTALLS, not the ones it
                 // replaces: authority comes from the prior event's pre-rotation
                 // commitment, proven by those keys signing here. Verifying
@@ -273,7 +272,7 @@ impl Kever {
                 let verfers = self.build_verfers()?;
                 Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
                 let ixn: InteractionEvent =
-                    serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+                    serder.sad().deserialize_into().map_err(CoreError::Json)?;
                 self.state = self.state.apply_interaction(&ixn)?;
             }
             "drt" => {
@@ -323,7 +322,7 @@ impl Kever {
             "rot" => {
                 self.reject_plain_rotation_when_delegated()?;
                 let rot: RotationEvent =
-                    serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+                    serder.sad().deserialize_into().map_err(CoreError::Json)?;
                 // Signed by the keys it installs — see `update`.
                 self.verify_rotation_sigs(serder.raw(), sigs, &rot.keys, &rot.keys_threshold.0)?;
                 self.state.apply_rotation(&rot)?
@@ -332,7 +331,7 @@ impl Kever {
                 let verfers = self.build_verfers()?;
                 Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
                 let ixn: InteractionEvent =
-                    serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+                    serder.sad().deserialize_into().map_err(CoreError::Json)?;
                 self.state.apply_interaction(&ixn)?
             }
             "drt" => {
@@ -359,7 +358,7 @@ impl Kever {
     pub fn verify_update_owned(
         &self,
         raw: &[u8],
-        sad: serde_json::Value,
+        sad: crate::sad::SadValue,
         sigs: &[Siger],
     ) -> Result<KeyState, CoreError> {
         if !self.incepted {
@@ -394,7 +393,7 @@ impl Kever {
         let new_state = match ilk.as_str() {
             "rot" => {
                 self.reject_plain_rotation_when_delegated()?;
-                let rot: RotationEvent = serde_json::from_value(sad).map_err(CoreError::Json)?;
+                let rot: RotationEvent = sad.deserialize_into().map_err(CoreError::Json)?;
                 // Signed by the keys it installs — see `update`.
                 self.verify_rotation_sigs(raw, sigs, &rot.keys, &rot.keys_threshold.0)?;
                 self.state.apply_rotation(&rot)?
@@ -402,7 +401,7 @@ impl Kever {
             "ixn" => {
                 let verfers = self.build_verfers()?;
                 Self::verify_sigs_static(raw, sigs, &verfers, &self.state.threshold)?;
-                let ixn: InteractionEvent = serde_json::from_value(sad).map_err(CoreError::Json)?;
+                let ixn: InteractionEvent = sad.deserialize_into().map_err(CoreError::Json)?;
                 self.state.apply_interaction(&ixn)?
             }
             "drt" => {
@@ -468,7 +467,7 @@ impl Kever {
         }
 
         let drt: DelegatedRotationEvent =
-            serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
+            serder.sad().deserialize_into().map_err(CoreError::Json)?;
 
         // Like a plain rotation, signed by the keys it installs.
         self.verify_rotation_sigs(serder.raw(), sigs, &drt.keys, &drt.keys_threshold.0)?;
@@ -718,17 +717,17 @@ mod tests {
     /// Fix the version string size so SAID computation is stable across
     /// Serder construction. Without this, Serder::new re-serializes with
     /// a corrected `v` field, changing the raw bytes and invalidating the SAID.
-    fn fix_version_string(sad: &mut serde_json::Value) {
+    fn fix_version_string(sad: &mut crate::sad::SadValue) {
         let placeholder = "#".repeat(44); // Blake3-256 qb64 length
         let is_self_addressing = sad.get("d") == sad.get("i");
         let orig_d = sad["d"].clone();
         let orig_i = sad["i"].clone();
-        sad["d"] = serde_json::Value::String(placeholder.clone());
+        sad["d"] = crate::sad::SadValue::String(placeholder.clone());
         if is_self_addressing {
-            sad["i"] = serde_json::Value::String(placeholder);
+            sad["i"] = crate::sad::SadValue::String(placeholder);
         }
         let temp_raw = serde_json::to_vec(sad).unwrap();
-        sad["v"] = serde_json::Value::String(format!("KERI10JSON{:06x}_", temp_raw.len()));
+        sad["v"] = crate::sad::SadValue::String(format!("KERI10JSON{:06x}_", temp_raw.len()));
         sad["d"] = orig_d;
         sad["i"] = orig_i;
     }
@@ -748,7 +747,7 @@ mod tests {
 
         let next_keys: Vec<String> = next_signers.iter().map(|s| next_key_digest(s)).collect();
 
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -783,7 +782,7 @@ mod tests {
 
         let next_keys: Vec<String> = next_signers.iter().map(|s| next_key_digest(s)).collect();
 
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "rot",
             "d": "",
@@ -808,7 +807,7 @@ mod tests {
 
     /// Helper: build an interaction event Serder.
     fn build_interaction_serder(prefix: &str, sn: u64, prior_said: &str) -> Serder {
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "ixn",
             "d": "",
@@ -841,7 +840,7 @@ mod tests {
     #[test]
     fn test_kever_inception_bad_ilk() {
         let signer = make_signer(42);
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "rot",
             "d": "",
@@ -1092,7 +1091,7 @@ mod tests {
             .map(|s| next_key_digest(s))
             .collect();
 
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -1142,7 +1141,7 @@ mod tests {
 
         // Build the inception event with i = victim's prefix, d = "" (different from i).
         // compute_said will see i != d and only replace d, leaving i as the victim's prefix.
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -1195,7 +1194,7 @@ mod tests {
         let wrong_signer = make_signer(99);
         let wrong_prefix = wrong_signer.verfer().qb64().unwrap();
 
-        let mut sad = serde_json::json!({
+        let mut sad = crate::sad!({
             "v": "KERI10JSON000000_",
             "t": "icp",
             "d": "",
@@ -1235,21 +1234,21 @@ mod tests {
         prefix: &str,
         sn: u64,
         prior: &str,
-        kt: serde_json::Value,
+        kt: crate::sad::SadValue,
         signers: &[&Signer],
-        nt: serde_json::Value,
+        nt: crate::sad::SadValue,
         next_signers: &[&Signer],
     ) -> Serder {
         let keys: Vec<String> = signers.iter().map(|s| s.verfer().qb64().unwrap()).collect();
         let next_keys: Vec<String> = next_signers.iter().map(|s| next_key_digest(s)).collect();
         let mut sad = if ilk == "icp" {
-            serde_json::json!({
+            crate::sad!({
                 "v": "KERI10JSON000000_", "t": "icp", "d": "", "i": "", "s": "0",
                 "kt": kt, "k": keys, "nt": nt, "n": next_keys,
                 "bt": "0", "b": [], "c": [], "a": []
             })
         } else {
-            serde_json::json!({
+            crate::sad!({
                 "v": "KERI10JSON000000_", "t": "rot", "d": "", "i": prefix,
                 "s": format!("{sn:x}"), "p": prior,
                 "kt": kt, "k": keys, "nt": nt, "n": next_keys,
@@ -1386,8 +1385,7 @@ mod tests {
         ];
         for (kt, nt, next, why) in cases {
             let icp = establishment("icp", "", 0, "", kt.into(), &[&k0], nt.into(), next);
-            let state =
-                KeyState::from_inception(&serde_json::from_value(icp.sad().clone()).unwrap());
+            let state = KeyState::from_inception(&icp.sad().deserialize_into().unwrap());
             assert!(state.is_err(), "{why} was accepted");
         }
 
@@ -1395,9 +1393,7 @@ mod tests {
         // and by key state.
         assert!(incept("0", &[&k0], "1", &[&k1]).is_err());
         let icp = establishment("icp", "", 0, "", "0".into(), &[&k0], "1".into(), &[&k1]);
-        assert!(
-            KeyState::from_inception(&serde_json::from_value(icp.sad().clone()).unwrap()).is_err()
-        );
+        assert!(KeyState::from_inception(&icp.sad().deserialize_into().unwrap()).is_err());
 
         // A weighted threshold that every key together cannot meet.
         let icp = establishment(
@@ -1405,13 +1401,11 @@ mod tests {
             "",
             0,
             "",
-            serde_json::json!([["1/3", "1/3"]]),
+            crate::sad!([["1/3", "1/3"]]),
             &[&k0, &k1],
             "1".into(),
             &[&k1],
         );
-        assert!(
-            KeyState::from_inception(&serde_json::from_value(icp.sad().clone()).unwrap()).is_err()
-        );
+        assert!(KeyState::from_inception(&icp.sad().deserialize_into().unwrap()).is_err());
     }
 }
