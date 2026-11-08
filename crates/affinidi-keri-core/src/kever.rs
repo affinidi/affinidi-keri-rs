@@ -264,8 +264,7 @@ impl Kever {
                 // commitment, proven by those keys signing here. Verifying
                 // against the outgoing key set instead both accepts events
                 // keripy rejects and rejects the ones it produces.
-                let verfers = Self::verfers_from_keys(&rot.keys)?;
-                Self::verify_sigs_static(serder.raw(), sigs, &verfers, &rot.keys_threshold.0)?;
+                self.verify_rotation_sigs(serder.raw(), sigs, &rot.keys, &rot.keys_threshold.0)?;
                 self.state = self.state.apply_rotation(&rot)?;
             }
             "ixn" => {
@@ -326,8 +325,7 @@ impl Kever {
                 let rot: RotationEvent =
                     serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
                 // Signed by the keys it installs — see `update`.
-                let verfers = Self::verfers_from_keys(&rot.keys)?;
-                Self::verify_sigs_static(serder.raw(), sigs, &verfers, &rot.keys_threshold.0)?;
+                self.verify_rotation_sigs(serder.raw(), sigs, &rot.keys, &rot.keys_threshold.0)?;
                 self.state.apply_rotation(&rot)?
             }
             "ixn" => {
@@ -398,8 +396,7 @@ impl Kever {
                 self.reject_plain_rotation_when_delegated()?;
                 let rot: RotationEvent = serde_json::from_value(sad).map_err(CoreError::Json)?;
                 // Signed by the keys it installs — see `update`.
-                let verfers = Self::verfers_from_keys(&rot.keys)?;
-                Self::verify_sigs_static(raw, sigs, &verfers, &rot.keys_threshold.0)?;
+                self.verify_rotation_sigs(raw, sigs, &rot.keys, &rot.keys_threshold.0)?;
                 self.state.apply_rotation(&rot)?
             }
             "ixn" => {
@@ -474,8 +471,7 @@ impl Kever {
             serde_json::from_value(serder.sad().clone()).map_err(CoreError::Json)?;
 
         // Like a plain rotation, signed by the keys it installs.
-        let verfers = Self::verfers_from_keys(&drt.keys)?;
-        Self::verify_sigs_static(serder.raw(), sigs, &verfers, &drt.keys_threshold.0)?;
+        self.verify_rotation_sigs(serder.raw(), sigs, &drt.keys, &drt.keys_threshold.0)?;
 
         delegation::verify_delegation(&drt.prefix, sn, &drt.said, &drt.delegator, proof, source)?;
 
@@ -641,6 +637,35 @@ impl Kever {
         Err(CoreError::InvalidPrefix(
             "prefix is neither a valid digest code nor a valid key code".into(),
         ))
+    }
+
+    /// Verify a rotation's signatures.
+    ///
+    /// A rotation is signed by the keys it installs, and must meet two
+    /// thresholds over them: its own `kt`, and the `nt` the prior
+    /// establishment event committed to. The rotation keys correspond
+    /// position for position to that event's next-key digests (checked by
+    /// [`KeyState::apply_rotation`]), so both are read over the same indices.
+    /// Checking `kt` alone would let a rotation lower its own bar: holding one
+    /// of three keys pre-committed under `nt: "2"`, a rotation declaring
+    /// `kt: "1"` would pass.
+    fn verify_rotation_sigs(
+        &self,
+        raw: &[u8],
+        sigs: &[Siger],
+        keys: &[String],
+        kt: &crate::threshold::Threshold,
+    ) -> Result<(), CoreError> {
+        if self.state.is_abandoned() {
+            return Err(CoreError::Validation(format!(
+                "identifier {} is abandoned: its last establishment event committed to no \
+                 next keys, so it cannot rotate",
+                self.state.prefix
+            )));
+        }
+        let verfers = Self::verfers_from_keys(keys)?;
+        Self::verify_sigs_static(raw, sigs, &verfers, kt)?;
+        Self::verify_sigs_static(raw, sigs, &verfers, &self.state.next_threshold)
     }
 
     /// Static helper to verify indexed signatures against a key set and threshold.
@@ -1199,6 +1224,194 @@ mod tests {
         assert!(
             err.contains("basic prefix does not match first public key"),
             "unexpected error: {err}"
+        );
+    }
+
+    /// An establishment event with explicit thresholds. `ilk` is `icp` or
+    /// `rot`; `prefix`, `sn` and `prior` are ignored for `icp`.
+    #[allow(clippy::too_many_arguments)] // a test fixture, read at each call
+    fn establishment(
+        ilk: &str,
+        prefix: &str,
+        sn: u64,
+        prior: &str,
+        kt: serde_json::Value,
+        signers: &[&Signer],
+        nt: serde_json::Value,
+        next_signers: &[&Signer],
+    ) -> Serder {
+        let keys: Vec<String> = signers.iter().map(|s| s.verfer().qb64().unwrap()).collect();
+        let next_keys: Vec<String> = next_signers.iter().map(|s| next_key_digest(s)).collect();
+        let mut sad = if ilk == "icp" {
+            serde_json::json!({
+                "v": "KERI10JSON000000_", "t": "icp", "d": "", "i": "", "s": "0",
+                "kt": kt, "k": keys, "nt": nt, "n": next_keys,
+                "bt": "0", "b": [], "c": [], "a": []
+            })
+        } else {
+            serde_json::json!({
+                "v": "KERI10JSON000000_", "t": "rot", "d": "", "i": prefix,
+                "s": format!("{sn:x}"), "p": prior,
+                "kt": kt, "k": keys, "nt": nt, "n": next_keys,
+                "bt": "0", "br": [], "ba": [], "c": [], "a": []
+            })
+        };
+        fix_version_string(&mut sad);
+        said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
+        Serder::new(SerializationKind::Json, sad).unwrap()
+    }
+
+    fn sign_all(serder: &Serder, signers: &[&Signer]) -> Vec<Siger> {
+        signers
+            .iter()
+            .enumerate()
+            .map(|(i, s)| s.sign_indexed(serder.raw(), i, true).unwrap())
+            .collect()
+    }
+
+    fn incept(
+        kt: &str,
+        signers: &[&Signer],
+        nt: &str,
+        next: &[&Signer],
+    ) -> Result<Kever, CoreError> {
+        let icp = establishment("icp", "", 0, "", kt.into(), signers, nt.into(), next);
+        let verfers: Vec<Verfer> = signers.iter().map(|s| s.verfer().clone()).collect();
+        Kever::new(&icp, &sign_all(&icp, signers), &verfers)
+    }
+
+    #[test]
+    fn a_rotation_to_no_next_keys_abandons_the_identifier() {
+        let (k0, k1, k2) = (make_signer(1), make_signer(2), make_signer(3));
+        let mut kever = incept("1", &[&k0], "1", &[&k1]).unwrap();
+        assert!(!kever.state().is_abandoned());
+        let prefix = kever.prefix().to_string();
+
+        let rot = establishment(
+            "rot",
+            &prefix,
+            1,
+            &kever.state().last_event_digest.clone(),
+            "1".into(),
+            &[&k1],
+            "0".into(),
+            &[],
+        );
+        kever.update(&rot, &sign_all(&rot, &[&k1])).unwrap();
+        assert!(kever.state().is_abandoned());
+        assert_eq!(
+            kever.state().next_threshold,
+            crate::threshold::Threshold::Simple(0)
+        );
+
+        // No interaction may follow, though the current key signs it.
+        let ixn = build_interaction_serder(&prefix, 2, &kever.state().last_event_digest.clone());
+        let err = kever
+            .verify_update(&ixn, &sign_all(&ixn, &[&k1]))
+            .unwrap_err();
+        assert!(err.to_string().contains("abandoned"), "{err}");
+
+        // Nor a rotation, whatever keys it names.
+        let rot = establishment(
+            "rot",
+            &prefix,
+            2,
+            &kever.state().last_event_digest.clone(),
+            "1".into(),
+            &[&k2],
+            "0".into(),
+            &[],
+        );
+        let err = kever
+            .verify_update(&rot, &sign_all(&rot, &[&k2]))
+            .unwrap_err();
+        assert!(err.to_string().contains("abandoned"), "{err}");
+    }
+
+    #[test]
+    fn an_inception_with_no_next_keys_is_abandoned_from_the_start() {
+        let k0 = make_signer(1);
+        let kever = incept("1", &[&k0], "0", &[]).unwrap();
+        assert!(kever.state().is_abandoned());
+    }
+
+    #[test]
+    fn a_rotation_must_meet_the_prior_next_threshold() {
+        let k0 = make_signer(1);
+        let (n0, n1, n2) = (make_signer(10), make_signer(11), make_signer(12));
+        let mut kever = incept("1", &[&k0], "2", &[&n0, &n1, &n2]).unwrap();
+        let prefix = kever.prefix().to_string();
+        let prior = kever.state().last_event_digest.clone();
+
+        // The rotation lowers its own `kt` to 1 and carries one signature:
+        // its own threshold is met, the pre-committed 2-of-3 is not.
+        let rot = establishment(
+            "rot",
+            &prefix,
+            1,
+            &prior,
+            "1".into(),
+            &[&n0, &n1, &n2],
+            "1".into(),
+            &[&k0],
+        );
+        let one = vec![n0.sign_indexed(rot.raw(), 0, true).unwrap()];
+        assert!(matches!(
+            kever.verify_update(&rot, &one),
+            Err(CoreError::ThresholdNotMet)
+        ));
+        let (raw, sad) = (rot.raw().to_vec(), rot.sad().clone());
+        assert!(matches!(
+            kever.verify_update_owned(&raw, sad, &one),
+            Err(CoreError::ThresholdNotMet)
+        ));
+
+        // Two of the three meet both.
+        let two = vec![
+            n0.sign_indexed(rot.raw(), 0, true).unwrap(),
+            n2.sign_indexed(rot.raw(), 2, true).unwrap(),
+        ];
+        kever.update(&rot, &two).unwrap();
+        assert_eq!(kever.sn(), 1);
+    }
+
+    #[test]
+    fn thresholds_must_fit_their_key_lists() {
+        let (k0, k1) = (make_signer(1), make_signer(2));
+        let cases: [(&str, &str, &[&Signer], &str); 4] = [
+            ("1", "0", &[&k1], "nt 0 beside next-key digests"),
+            ("1", "1", &[], "a non-zero nt with no next keys"),
+            ("2", "1", &[&k1], "kt above the key count"),
+            ("1", "2", &[&k1], "nt above the next-key count"),
+        ];
+        for (kt, nt, next, why) in cases {
+            let icp = establishment("icp", "", 0, "", kt.into(), &[&k0], nt.into(), next);
+            let state =
+                KeyState::from_inception(&serde_json::from_value(icp.sad().clone()).unwrap());
+            assert!(state.is_err(), "{why} was accepted");
+        }
+
+        // A zero signing threshold is refused, both by the signature check
+        // and by key state.
+        assert!(incept("0", &[&k0], "1", &[&k1]).is_err());
+        let icp = establishment("icp", "", 0, "", "0".into(), &[&k0], "1".into(), &[&k1]);
+        assert!(
+            KeyState::from_inception(&serde_json::from_value(icp.sad().clone()).unwrap()).is_err()
+        );
+
+        // A weighted threshold that every key together cannot meet.
+        let icp = establishment(
+            "icp",
+            "",
+            0,
+            "",
+            serde_json::json!([["1/3", "1/3"]]),
+            &[&k0, &k1],
+            "1".into(),
+            &[&k1],
+        );
+        assert!(
+            KeyState::from_inception(&serde_json::from_value(icp.sad().clone()).unwrap()).is_err()
         );
     }
 }

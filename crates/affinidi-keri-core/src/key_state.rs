@@ -76,6 +76,28 @@ impl KeyState {
         }
     }
 
+    /// Whether the identifier is abandoned: its last establishment event
+    /// committed to no next keys (`nt: "0"`, an empty `n`).
+    ///
+    /// An abandoned identifier can never rotate, and no event of any kind may
+    /// follow the one that abandoned it — as keripy holds it. For `did:webs`
+    /// this is deactivation.
+    pub fn is_abandoned(&self) -> bool {
+        self.next_keys.is_empty()
+    }
+
+    /// Refuse any event after the identifier was abandoned.
+    fn reject_if_abandoned(&self) -> Result<(), CoreError> {
+        if self.is_abandoned() {
+            return Err(CoreError::Validation(format!(
+                "identifier {} is abandoned: its establishment event at sn {} committed to \
+                 no next keys, so no event may follow",
+                self.prefix, self.sn
+            )));
+        }
+        Ok(())
+    }
+
     /// Create initial key state from an inception event.
     ///
     /// # Errors
@@ -90,6 +112,7 @@ impl KeyState {
 
         let threshold = event.keys_threshold.0.clone();
         let next_threshold = event.next_threshold.0.clone();
+        check_key_thresholds(&threshold, &event.keys, &next_threshold, &event.next_keys)?;
 
         let backer_threshold = parse_backer_threshold(&event.backer_threshold)?;
 
@@ -140,6 +163,13 @@ impl KeyState {
             ));
         }
 
+        check_key_thresholds(
+            &event.keys_threshold.0,
+            &event.keys,
+            &event.next_threshold.0,
+            &event.next_keys,
+        )?;
+
         let backer_threshold = parse_backer_threshold(&event.backer_threshold)?;
         if backer_threshold > event.backers.len() {
             return Err(CoreError::Validation(format!(
@@ -173,6 +203,7 @@ impl KeyState {
     /// # Errors
     /// Returns `CoreError` if the rotation event is invalid relative to current state.
     pub fn apply_rotation(&self, event: &RotationEvent) -> Result<Self, CoreError> {
+        self.reject_if_abandoned()?;
         let sn = parse_sn(&event.sn)?;
         if sn != self.sn + 1 {
             return Err(CoreError::OutOfOrder {
@@ -201,6 +232,7 @@ impl KeyState {
 
         let threshold = event.keys_threshold.0.clone();
         let next_threshold = event.next_threshold.0.clone();
+        check_key_thresholds(&threshold, &event.keys, &next_threshold, &event.next_keys)?;
         let backer_threshold = parse_backer_threshold(&event.backer_threshold)?;
 
         // Compute new backer list: remove then add
@@ -302,6 +334,7 @@ impl KeyState {
     /// # Errors
     /// Returns `CoreError` if the interaction event is invalid relative to current state.
     pub fn apply_interaction(&self, event: &InteractionEvent) -> Result<Self, CoreError> {
+        self.reject_if_abandoned()?;
         let sn = parse_sn(&event.sn)?;
         if sn != self.sn + 1 {
             return Err(CoreError::OutOfOrder {
@@ -328,6 +361,30 @@ impl KeyState {
         new_state.sn = sn;
         new_state.last_event_digest = event.said.clone();
         Ok(new_state)
+    }
+}
+
+/// Check an establishment event's thresholds against its key lists.
+///
+/// The signing threshold `kt` must be met by the keys `k`. The next threshold
+/// `nt` is zero exactly when `n` is empty — that commits to no next keys and
+/// abandons the identifier — and is otherwise met by the committed keys.
+/// A zero `nt` beside next-key digests would commit to keys no signature
+/// could ever exercise; a non-zero one beside none could never be met.
+fn check_key_thresholds(
+    kt: &Threshold,
+    keys: &[String],
+    nt: &Threshold,
+    next_keys: &[String],
+) -> Result<(), CoreError> {
+    kt.check_satisfiable(keys.len(), "kt")?;
+    match (nt.is_zero(), next_keys.is_empty()) {
+        (true, true) => Ok(()),
+        (true, false) => Err(CoreError::Validation(format!(
+            "nt is 0 but n commits to {} next key(s)",
+            next_keys.len()
+        ))),
+        (false, _) => nt.check_satisfiable(next_keys.len(), "nt"),
     }
 }
 

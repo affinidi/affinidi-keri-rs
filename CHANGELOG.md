@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-09
+
+### Security
+
+- **A rotation must meet the prior event's next threshold.** Rotation
+  signatures were checked only against the rotation's own `kt`, never against
+  the `nt` the previous establishment event committed to. A rotation could
+  lower its own bar: holding one of three keys pre-committed under `nt: "2"`,
+  a rotation declaring `kt: "1"` and signed by that key alone was accepted,
+  and moved control of the identifier. All four rotation paths
+  (`Kever::update`, `verify_update`, `verify_update_owned`,
+  `verify_update_delegated`) now require both thresholds, through one shared
+  check.
+
+- **Thresholds are checked against their key lists.** Every establishment
+  event's `kt` must be met by `k` (at least 1, at most the key count; a
+  weighted threshold must weigh no more keys than there are and be met when
+  all sign), and `nt` by `n`. A threshold that can never be met made a key set
+  unusable without anything saying so.
+
+### Fixed
+
+- **`nt: "0"` is accepted.** An establishment event with `nt: "0"` and an
+  empty `n` commits to no next keys, abandoning the identifier. This is how
+  KERI ends one and how `did:webs` deactivates a DID. The 0.1.1 hardening
+  refused zero thresholds at the parser, which caught `nt` along with `kt`.
+  `Threshold::from_json_value` now parses `"0"`. Key state requires `kt` of
+  at least 1, and allows a zero `nt` only beside an empty `n`, and a non-zero
+  one only beside a non-empty `n`.
+
+- **Nothing follows an abandoned identifier.** Once the last establishment
+  event commits to no next keys, any later rotation, delegated rotation or
+  interaction is refused, as keripy refuses it.
+
+### Added
+
+- `KeyState::is_abandoned`, `Threshold::is_zero` and
+  `Threshold::check_satisfiable`.
+
 ## [0.4.0] - 2026-08-23
 
 An identifier could not be resumed across a process boundary. This adds the
