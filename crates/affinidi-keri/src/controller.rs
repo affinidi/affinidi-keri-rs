@@ -409,6 +409,12 @@ fn check_thresholds(
             )));
         }
     }
+    // A threshold counts positions, not holders: a key listed twice is one
+    // holder filling two places, so `kt "2"` over `[K, K]` is met by K alone.
+    // The same goes for `n`, where a repeated digest commits one successor to
+    // two places of the next rotation.
+    refuse_repeats(keys, "k")?;
+    refuse_repeats(next, "n")?;
     threshold.check_satisfiable(keys.len(), "kt")?;
     match (next_threshold.is_zero(), next.is_empty()) {
         (true, true) => Ok(()),
@@ -417,6 +423,16 @@ fn check_thresholds(
             next.len()
         ))),
         (false, _) => Ok(next_threshold.check_satisfiable(next.len(), "nt")?),
+    }
+}
+
+fn refuse_repeats(items: &[String], field: &str) -> Result<(), KeriError> {
+    let mut seen = std::collections::HashSet::with_capacity(items.len());
+    match items.iter().find(|item| !seen.insert(item.as_str())) {
+        Some(item) => Err(KeriError::Config(format!(
+            "{field} lists {item} more than once; each place must be a distinct key"
+        ))),
+        None => Ok(()),
     }
 }
 

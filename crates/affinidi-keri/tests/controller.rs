@@ -284,3 +284,40 @@ fn a_rotation_committing_no_keys_abandons_the_identifier() {
     verify(&[id.log[0].clone(), rot.composed]).expect("abandonment verifies");
     assert!(state.rotate(&[], &next_rotation(&key(4), &key(5))).is_err());
 }
+
+/// A threshold counts places, not holders, so a key listed twice would let
+/// one holder meet `kt "2"` alone. The builder refuses it in `k` and in `n`.
+#[test]
+fn a_key_listed_twice_is_refused() {
+    let (r0, r1, k) = (key(1), key(2), key(3));
+    let repeated_k = incept(&Inception::new(
+        vec![pk(&r0), pk(&r0)],
+        Threshold::Simple(2),
+        vec![NextKey::PublicKey(pk(&r1))],
+        Threshold::Simple(1),
+    ));
+    assert!(
+        matches!(repeated_k, Err(affinidi_keri::KeriError::Config(m)) if m.contains("more than once"))
+    );
+
+    // The same successor named once by key and once by digest is still one key.
+    let r1_digest = NextKey::PublicKey(pk(&r1)).digest().unwrap();
+    let repeated_n = incept(&Inception::new(
+        vec![pk(&r0)],
+        Threshold::Simple(1),
+        vec![NextKey::PublicKey(pk(&r1)), NextKey::Digest(r1_digest)],
+        Threshold::Simple(2),
+    ));
+    assert!(
+        matches!(repeated_n, Err(affinidi_keri::KeriError::Config(m)) if m.contains("more than once"))
+    );
+
+    // A rotation cannot put the routine successor in the recovery key's
+    // place either: each key is matched to the digest committed at its
+    // position, before any threshold is read.
+    let id = incept_with_recovery(&r0, &r1, &k);
+    let takeover = id
+        .state
+        .rotate(&[pk(&r1), pk(&r1)], &next_rotation(&key(4), &key(5)));
+    assert!(matches!(takeover, Err(affinidi_keri::KeriError::Config(m)) if m.contains("key 1")));
+}
