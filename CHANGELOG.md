@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-09
+
+### Added
+
+- **`affinidi_keri::controller`: identifiers whose keys this library never
+  holds.** `Hab` derives every key from one salt, which suits a wallet but not
+  a custodian whose keys live in an HSM, an enclave or a key service, or one
+  that shares control with someone else. The new module builds events from
+  public material alone and takes signatures as they arrive:
+  - `incept`, `ControllerState::rotate` and `ControllerState::interact` return
+    a `PendingEvent` — serializable, so it can wait for a remote signer.
+  - Next keys are `NextKey::Digest` or `NextKey::PublicKey`, so a second
+    party's recovery key can be committed from its digest alone.
+  - `PendingEvent::sign_with` takes a `KeySigner` (implemented for `Signer`);
+    `add_signature` takes a raw signature made elsewhere. Each is verified
+    when added.
+  - `PendingEvent::finish` refuses unless the signatures meet the event's
+    `kt` and, for a rotation, the prior event's `nt`, then returns the signed
+    event and the `ControllerState` it produces.
+
+  With `n = [H(R′), H(K)]` and `nt = [["1/2", "1"]]`, a rotation is accepted
+  when signed by `K`, or by `R′` and `K`, and refused when signed by `R′`
+  alone — tested through `Kever`, not only `finish`. Only `affinidi-keri`
+  changes; the salt-based `Hab` is unchanged.
+
 ## [0.5.0] - 2026-11-09
 
 ### Changed (breaking)

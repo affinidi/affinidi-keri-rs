@@ -1,4 +1,5 @@
 pub mod config;
+pub mod controller;
 pub mod direct;
 pub mod error;
 pub mod hab;
