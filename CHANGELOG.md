@@ -28,8 +28,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   With `n = [H(R′), H(K)]` and `nt = [["1/2", "1"]]`, a rotation is accepted
   when signed by `K`, or by `R′` and `K`, and refused when signed by `R′`
-  alone — tested through `Kever`, not only `finish`. Only `affinidi-keri`
-  changes; the salt-based `Hab` is unchanged.
+  alone — tested through `Kever`, not only `finish`. `incept` and `rotate`
+  refuse a key listed twice in `k` or a digest listed twice in `n`: a
+  threshold counts places, not holders, so `kt "2"` over `[K, K]` would be met
+  by `K` alone. The salt-based `Hab` is unchanged.
+
+  Only `affinidi-keri` changes. `affinidi-keri-crypto`, `-core` and `-db` are
+  republished unchanged at 0.5.1, because the crates release in lockstep.
 
 ## [0.5.0] - 2026-11-09
 
