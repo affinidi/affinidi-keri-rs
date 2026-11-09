@@ -65,7 +65,7 @@ pub struct Hab {
 /// We temporarily set `d` (and `i` for self-addressing inception) to 44-char
 /// placeholders, serialize to compute the correct size, update `v`, then
 /// restore the original values so `compute_said` can run normally.
-fn fix_version_string(sad: &mut affinidi_keri_core::SadValue) -> Result<(), KeriError> {
+pub(crate) fn fix_version_string(sad: &mut affinidi_keri_core::SadValue) -> Result<(), KeriError> {
     let placeholder = "#".repeat(44); // Blake3-256 qb64 length
     let is_self_addressing = sad.get("d") == sad.get("i");
 
