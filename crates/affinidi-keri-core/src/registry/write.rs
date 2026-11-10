@@ -31,7 +31,7 @@ use affinidi_keri_crypto::Diger;
 use serde::{Deserialize, Serialize};
 
 use super::Anchor;
-use crate::composer::{frame, push_group};
+use crate::composer::{frame, number, push_group};
 use crate::counter_table::{CounterTable, GroupKind};
 use crate::error::CoreError;
 use crate::parser::BlindedState;
@@ -225,6 +225,28 @@ impl RegistryState {
         ))
     }
 
+    /// Continue `registry` from the published stream: the state after its
+    /// latest update the issuer's KEL anchors.
+    ///
+    /// Read and checked as [`designations`](super::designations) reads a
+    /// registry: the inception is the log's issuer's and anchored, the updates
+    /// form a chain, and every registry event the KEL anchors is in the
+    /// stream. So a caller needs no store of its own, and cannot continue from
+    /// a state that the stream it publishes contradicts.
+    ///
+    /// # Errors
+    /// Returns [`RegistryError`](super::RegistryError) if the registry is
+    /// missing, not the issuer's, unanchored or broken, or if the KEL anchors
+    /// a registry event the stream leaves out.
+    pub fn resume(
+        stream: &[crate::parser::ParsedMessage],
+        log: &super::IssuerLog,
+        registry: &str,
+    ) -> Result<Self, super::RegistryError> {
+        super::check_anchored_events_present(stream, log)?;
+        super::v2::head(stream, log, registry)
+    }
+
     /// A designation credential of `schema`, bound to this registry, with the
     /// attribute block `attributes` (an object; its `d` is computed).
     ///
@@ -414,21 +436,6 @@ fn saidify(mut sad: SadValue) -> Result<(String, Vec<u8>), CoreError> {
 fn cesr(code: &str, raw: &[u8], fs: usize) -> Result<String, CoreError> {
     encode_qb64(code, raw, fs)
         .map_err(|e| CoreError::ParseError(format!("cannot encode {code}: {e}")))
-}
-
-/// A sequence number as keripy's `Number` writes it: the smallest of Short
-/// (`M`, 2 bytes), Long (`0H`, 4), Tall (`R`, 5) and Big (`N`, 8) that holds it.
-fn number(n: u64) -> Result<String, CoreError> {
-    let bytes = n.to_be_bytes();
-    if n <= 0xffff {
-        cesr("M", &bytes[6..], 4)
-    } else if n <= 0xffff_ffff {
-        cesr("0H", &bytes[4..], 8)
-    } else if n <= 0xff_ffff_ffff {
-        cesr("R", &bytes[3..], 8)
-    } else {
-        cesr("N", &bytes, 12)
-    }
 }
 
 #[cfg(test)]

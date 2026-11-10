@@ -1,0 +1,37 @@
+{
+  "note": "two rpy messages endorsed under the key state of the rotation at sn 1",
+  "expect": "accept",
+  "keripy": {
+    "prefix": "ENEO2xKcLViWl8RUa3unlANCgwiF_A-jJ3Y1f1FCYeQR",
+    "sn": 1,
+    "said": "EABG-qq19A7TSxoWO5HmGt6dtz72fY-PaW4AwpblVaKQ",
+    "ilk": "rot",
+    "version": "2.0",
+    "keys": [
+      "DNOLOFvk1HtX82X_BLd615w9y3zn1Fe_FWLG_XF8K7qP"
+    ],
+    "kt": "1",
+    "n": [
+      "EMYG1tEsTLooqBw4R8d2wCvzFA0mqE1_3SDTuaIx25GO"
+    ],
+    "nt": "1",
+    "establishment": {
+      "sn": 1,
+      "said": "EABG-qq19A7TSxoWO5HmGt6dtz72fY-PaW4AwpblVaKQ"
+    }
+  },
+  "ends": [
+    [
+      "ENEO2xKcLViWl8RUa3unlANCgwiF_A-jJ3Y1f1FCYeQR",
+      "controller",
+      "ENEO2xKcLViWl8RUa3unlANCgwiF_A-jJ3Y1f1FCYeQR"
+    ]
+  ],
+  "locs": [
+    [
+      "ENEO2xKcLViWl8RUa3unlANCgwiF_A-jJ3Y1f1FCYeQR",
+      "https",
+      "https://example.com/"
+    ]
+  ]
+}

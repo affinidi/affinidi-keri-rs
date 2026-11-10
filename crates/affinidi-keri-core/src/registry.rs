@@ -771,6 +771,55 @@ mod v2 {
         Ok(Ok(None)) // no non-vacuous update yet: not issued
     }
 
+    /// The state to continue `registry` from: its inception verified and
+    /// anchored, then every update the read may see, in order.
+    pub(super) fn head(
+        stream: &[ParsedMessage],
+        log: &IssuerLog,
+        registry: &str,
+    ) -> Result<write::RegistryState, RegistryError> {
+        let broken = |reason: String| RegistryError::Chain {
+            registry: registry.into(),
+            reason,
+        };
+        let rip = stream
+            .iter()
+            .find(|m| is_acdc(m) && ilk_of(m) == Some("rip") && said_of(m) == Some(registry))
+            .ok_or_else(|| broken("it has no inception event in the stream".into()))?;
+        registry_event(rip, "rip").map_err(broken)?;
+        let rsad = rip.serder.sad();
+        if rsad.get("i").and_then(|v| v.as_str()) != Some(log.prefix()) {
+            return Err(broken(format!("it was not incepted by {}", log.prefix())));
+        }
+        if rsad.get("n").and_then(|v| v.as_str()) != Some("0") {
+            return Err(broken("its inception is not at n 0".into()));
+        }
+        match anchored_v2(log, registry) {
+            Anchoring::Within(_) => {}
+            Anchoring::Later => {
+                return Err(broken("it is not incepted yet, as of the limit".into()));
+            }
+            Anchoring::Absent => {
+                return Err(RegistryError::UnanchoredEvent {
+                    said: registry.into(),
+                });
+            }
+        }
+        let chain = chain(stream, log, registry)?;
+        let (head, n) = chain.last().map_or((registry.to_string(), 0), |(m, _)| {
+            (
+                said_of(m).unwrap_or_default().to_string(),
+                chain.len() as u64,
+            )
+        });
+        Ok(write::RegistryState {
+            issuer: log.prefix().into(),
+            registry: registry.into(),
+            head,
+            n,
+        })
+    }
+
     /// A 2.x registry event's fields and SAID.
     fn registry_event(msg: &ParsedMessage, ilk: &str) -> Result<(), String> {
         check_acdc_fields(msg.serder.sad(), 2, Some(ilk)).map_err(|e| e.to_string())?;

@@ -267,6 +267,61 @@ fn native_cesr_bodies_are_refused_by_name() {
 }
 
 #[test]
+fn endorsed_replies_are_composed_as_keripy_composes_them() {
+    // Two `rpy` messages endorsed under the key state of the rotation at sn 1:
+    // a `-X` group whose sequence number is a 2.x `Number` (`MAAB`), not the
+    // 1.x `Seqner`. Recomposing each from what was parsed must give keripy's
+    // bytes, with the genus-version counter `compose_endorsed` writes first.
+    let name = "v2-endorsed-replies";
+    let f = fixture(name);
+    assert_eq!(f.expect, "accept");
+    let messages = parser::parse_all(&f.published).unwrap();
+    let (kel, replies): (Vec<_>, Vec<_>) = messages
+        .into_iter()
+        .partition(|m| m.serder.ilk().unwrap() != "rpy");
+    let r = replay(&kel);
+    assert!(r.refused.is_none(), "{name}: the KEL verifies");
+    assert_state(name, &r, &f.keripy);
+    assert_eq!(replies.len(), 2);
+
+    let text = std::str::from_utf8(&f.published).unwrap();
+    for reply in &replies {
+        let [group] = reply.trans_idx_sig_groups() else {
+            panic!("{name}: one endorsement per reply");
+        };
+        assert_eq!(group.sn, "MAAB", "{name}: sn as a 2.x Number");
+        assert_eq!(
+            group.said,
+            r.kever.state().said,
+            "{name}: names the rotation"
+        );
+
+        let body = std::str::from_utf8(reply.serder.raw()).unwrap();
+        let start = text.find(body).unwrap();
+        let end = text[start + 1..]
+            .find("{\"v\":")
+            .map_or(text.len(), |i| start + 1 + i);
+        let mut expected = b"-_AAACAA".to_vec();
+        expected.extend_from_slice(&f.published[start..end]);
+
+        let ours = affinidi_keri_core::composer::compose_endorsed(
+            &reply.serder,
+            &group.prefix,
+            1,
+            &group.said,
+            &group.sigs,
+        )
+        .unwrap();
+        assert_eq!(
+            String::from_utf8(ours).unwrap(),
+            String::from_utf8(expected).unwrap(),
+            "{name}: {}",
+            reply.serder.sad()["r"]
+        );
+    }
+}
+
+#[test]
 fn every_fixture_is_covered() {
     let mut names: Vec<String> = std::fs::read_dir(dir())
         .unwrap()
@@ -284,6 +339,7 @@ fn every_fixture_is_covered() {
             "v1-basic",
             "v2-basic",
             "v2-basic-native",
+            "v2-endorsed-replies",
             "v2-multisig-2of3",
             "v2-recovery-by-k",
             "v2-recovery-by-r-and-k",
