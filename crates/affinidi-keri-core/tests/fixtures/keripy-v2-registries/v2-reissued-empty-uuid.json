@@ -1,0 +1,12 @@
+{
+  "note": "the same re-issuance in public mode (empty UUID): updates 1 and 3 disclose the same state, so they have the same BLID. keripy's vetBinds matches disclosures to updates by BLID from a detached list and refuses two matches (UnverifiedBlindError). In the stream each disclosure is attached to its own bup, so it is unambiguous; a reader that binds by attachment accepts it. Writers should use a fresh UUID per update (v2-reissued)",
+  "issuer": "EJwZl-OTOgvVh6THVBwxHa-x2YLJObwvfh4Isfc_ts38",
+  "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+  "registry": "EKx_mC5PnzHbdwME6jsgsKlVvoIfcg97eZLBH_Y48cTN",
+  "credential": "EERZj65zYe42N8TaoEB08Fz2SPVYygPahwfBxEoj-8ew",
+  "limit": null,
+  "expect": "issued",
+  "keripy": {
+    "error": "UnverifiedBlindError"
+  }
+}

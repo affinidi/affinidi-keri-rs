@@ -1,0 +1,12 @@
+{
+  "note": "a bup the issuer's KEL never anchored is in the stream: it establishes nothing, and keripy refuses the whole determination",
+  "issuer": "ENAHp1BImBLti3Wgy4ekeoviUvhSZboRAMcwcZHs4Ano",
+  "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+  "registry": "EM0qJqmXpTwPiPahPHUmIL4BU6sffKJA4O1tITAEdr1X",
+  "credential": "EIFFCYCnzhQkVFmL79kCWQLu5to_fGIuOZvBeWvvsUg2",
+  "limit": null,
+  "expect": "error:unanchored-event",
+  "keripy": {
+    "error": "MissingAnchorError"
+  }
+}

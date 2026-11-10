@@ -1,0 +1,12 @@
+{
+  "note": "the head bup carries no disclosure: every update back to the latest non-vacuous one must be disclosed",
+  "issuer": "EGn_4AJ9rPQXkOttVCkWSwQkppNmrxxX9uoeH1EQb3Xw",
+  "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+  "registry": "EP3gXsroa5d8qyb6VQJYKfFOzhGHu4ZYVZbtwoeVNaAF",
+  "credential": "EOwaAXOUbZqUtE-RRIwukp86_ZiPX6Jk2UMPUDJ0Byam",
+  "limit": null,
+  "expect": "error:undisclosed-update",
+  "keripy": {
+    "error": "UnverifiedBlindError"
+  }
+}

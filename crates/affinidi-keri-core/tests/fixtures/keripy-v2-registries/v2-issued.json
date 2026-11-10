@@ -1,0 +1,14 @@
+{
+  "note": "rip, acm, bup(issued); every event anchored and disclosed",
+  "issuer": "EFX1fBRSXCnObIVNsZ_W2Vqf9-dojND7bAedRv7uO_G5",
+  "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+  "registry": "EI48pEcVcETjtYNv6RmyfLpHNLWxQlgUyAYodY8zLZYB",
+  "credential": "EE60q4tO__g45dEpC4efWQDSvWnGpHYi2qSm-f3O14at",
+  "limit": null,
+  "expect": "issued",
+  "keripy": {
+    "status": "issued",
+    "binding": "mutual",
+    "head": "ENjXWdoriFij216smoTbDAcY9QoAE6BOpx004vENJ7P3"
+  }
+}

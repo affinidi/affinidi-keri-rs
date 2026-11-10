@@ -1,0 +1,14 @@
+{
+  "note": "issued, revoked, issued again, each update with its own disclosed UUID: the latest non-vacuous update rules",
+  "issuer": "EAQR5amK-y719-fDud1YLciOYogoOSokavPrUY8tn2Fi",
+  "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+  "registry": "EKmbVEWbPzS5tvG1GpBEFxJX-qTw67fhaN-xXC3TbPZQ",
+  "credential": "EPWU-hio_GSSnvTAVrErhSpXf--_ARPYqHeYSgG769f9",
+  "limit": null,
+  "expect": "issued",
+  "keripy": {
+    "status": "issued",
+    "binding": "mutual",
+    "head": "EFI_Jx7Oo_r5QCMyyjzMwpSO1UQW5kHP4G0Dz_OIU4Lq"
+  }
+}

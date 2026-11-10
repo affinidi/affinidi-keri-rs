@@ -1,0 +1,14 @@
+{
+  "note": "the revoked stream resolved as of the KEL event anchoring the issuance (versionId): the later revocation is not yet anchored, so the credential stands. keripy has no KEL-position cutoff (vetBinds' cutoff is a time); its verdict here is over the updates anchored by then",
+  "issuer": "EMlmLWeZQmzPb-a7gSlFP3XiWhsbXWO8cyx-K5tM9LaL",
+  "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+  "registry": "ELLEQA8M2NVf1FIHNcdXpG82-sWLrvVkUmW-DTd9CTwu",
+  "credential": "EKgjzo4bu0Argm9hBnu7-5vi418A-rLYlTuNTiYv0L36",
+  "limit": 2,
+  "expect": "issued",
+  "keripy": {
+    "status": "issued",
+    "binding": "mutual",
+    "head": "EJLNt5gyYOii9N4j2aLxwacOasVN6L_Nuaveo2DI7tai"
+  }
+}
