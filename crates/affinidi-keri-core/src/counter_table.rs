@@ -111,6 +111,10 @@ pub enum GroupKind {
     /// Seal source couples: (sequence number, event SAID). This is the
     /// delegator anchor carried with a delegated event.
     SealSourceCouples,
+    /// Blinded state quadruples (2.x `-a`): (BLID, UUID, transaction ACDC
+    /// SAID, transaction state), the disclosed state of a blindable registry
+    /// update.
+    BlindedStateQuadruples,
 }
 
 impl GroupKind {
@@ -143,6 +147,7 @@ impl GroupKind {
             (CounterTable::V2, "O") => Some(Self::FirstSeenReplayCouples),
             (CounterTable::V2, "S") => Some(Self::SealSourceCouples),
             (CounterTable::V2, "X") => Some(Self::TransIdxSigGroups),
+            (CounterTable::V2, "a") => Some(Self::BlindedStateQuadruples),
 
             _ => None,
         }
@@ -169,7 +174,9 @@ impl GroupKind {
             (CounterTable::V2, Self::FirstSeenReplayCouples) => "-O",
             (CounterTable::V2, Self::SealSourceCouples) => "-S",
             (CounterTable::V2, Self::TransIdxSigGroups) => "-X",
+            (CounterTable::V2, Self::BlindedStateQuadruples) => "-a",
             (CounterTable::V2, Self::TransReceiptQuadruples) => return None,
+            (CounterTable::V1, Self::BlindedStateQuadruples) => return None,
         };
         Some(code)
     }
