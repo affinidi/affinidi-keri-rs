@@ -361,6 +361,14 @@ impl KeyState {
     /// Returns `CoreError` if the interaction event is invalid relative to current state.
     pub fn apply_interaction(&self, event: &InteractionEvent) -> Result<Self, CoreError> {
         self.reject_if_abandoned()?;
+        // KERI spec, Configuration traits field: under `EO` a validator drops
+        // any non-establishment event.
+        if self.config.iter().any(|t| t == ESTABLISHMENT_ONLY) {
+            return Err(CoreError::Validation(
+                "the identifier is establishment-only (EO): interaction events are not allowed"
+                    .into(),
+            ));
+        }
         let protocol_major = self.check_version(&event.version)?;
         let sn = parse_sn(&event.sn)?;
         if sn != self.sn + 1 {
@@ -416,22 +424,33 @@ fn check_key_thresholds(
     }
 }
 
+/// Establishment-only: a validator drops any interaction event.
+pub const ESTABLISHMENT_ONLY: &str = "EO";
+/// Do-not-delegate: a validator drops any delegated event under this
+/// identifier as delegator.
+pub const DO_NOT_DELEGATE: &str = "DND";
+/// The traits the KERI specification allows only at inception.
+pub const INCEPTION_ONLY_TRAITS: &[&str] = &[ESTABLISHMENT_ONLY, DO_NOT_DELEGATE, "DID"];
+
 /// The configuration traits after a rotation.
 ///
 /// A version 1 rotation has no `c` field, so it leaves the traits as they
 /// were; clearing them, as treating the absent field as empty would, would
 /// silently lift an inception's restrictions. A version 2 rotation's `c`
-/// adds to them and cannot remove any: the traits KERI defines (`EO`, `DND`,
-/// …) restrict the identifier, and a rotation that could drop one would undo
-/// a restriction its inception made.
+/// adds to them and cannot remove any.
 ///
-/// keripy at b70986f reads a v2 rotation's `c` but applies traits only at
-/// inception; this records the added traits as well. Neither crate enforces
-/// `EO` or `DND` yet.
+/// `EO`, `DND` and `DID` are inception-only (KERI spec, Configuration traits
+/// field). keripy at b70986f accepts a rotation carrying one and ignores it
+/// (fixture `v2-eo-in-rotation`); so does this, for interop. The specification
+/// says they "MUST only appear in the Inception", which reads as refusing such
+/// a rotation; that disagreement is recorded in the fixtures' README.
 fn rotated_config(prior: &[String], protocol_major: u8, added: &[String]) -> Vec<String> {
     let mut config = prior.to_vec();
     if protocol_major >= 2 {
         for trait_code in added {
+            if INCEPTION_ONLY_TRAITS.contains(&trait_code.as_str()) {
+                continue;
+            }
             if !config.contains(trait_code) {
                 config.push(trait_code.clone());
             }

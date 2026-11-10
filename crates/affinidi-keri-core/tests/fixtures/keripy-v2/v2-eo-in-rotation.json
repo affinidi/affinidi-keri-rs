@@ -1,0 +1,23 @@
+{
+  "note": "EO and DND in a rotation's c: inception-only traits, which keripy ignores there; the ixn is accepted",
+  "expect": "accept",
+  "keripy": {
+    "prefix": "EHwaWScdIb49r-HKA4wphM1aKDVkhKv_dFqUTEnQQLSD",
+    "sn": 2,
+    "said": "ENgeWy3fQK6qTf9HIjVzIqpbN9UOSJNIkiN4KlrhxvNs",
+    "ilk": "ixn",
+    "version": "2.0",
+    "keys": [
+      "DETcMOiDKjjCnukTwZu_7VaYrudMy6zFqJqFgaEynMDI"
+    ],
+    "kt": "1",
+    "n": [
+      "ELDLQFp69VGS7_tPvP2GFAfjmgQNG5Ojdgmc__LWRHxw"
+    ],
+    "nt": "1",
+    "establishment": {
+      "sn": 1,
+      "said": "ENmd43bEjVqJvud9Tvqvy3e2cL3BceGC5MSE5Rx0Bk68"
+    }
+  }
+}

@@ -77,3 +77,12 @@ moving to a newer keripy commit is a behaviour change to review.
   with a seal such as `{"x": …}` keeps it in the builder's SAD, but the body,
   its SAID and its signatures leave it out, and a reader sees fewer seals.
   This reader's writer refuses instead (it only writes to check a SAID).
+- **Configuration traits apply at inception.** `EO` drops any interaction
+  event (`v2-eo-interaction`; a rotation is fine, `v2-eo-rotation`), and a
+  delegated event is dropped when its delegator has `DND`, though the
+  delegator anchors it (`v2-dnd-delegator`). `EO`, `DND` and `DID` are
+  inception-only in the KERI specification, which says they "MUST only appear
+  in the Inception"; keripy accepts a rotation carrying them and ignores them
+  there (`v2-eo-in-rotation`, whose `ixn` after a rotation adding `EO` is
+  accepted). We follow keripy; the specification reads as refusing such a
+  rotation, a disagreement to raise upstream.

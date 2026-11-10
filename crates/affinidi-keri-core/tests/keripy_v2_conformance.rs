@@ -304,6 +304,24 @@ fn native_bodies_verify_through_the_owned_sad_paths() {
 struct VerifiedDelegator {
     prefix: String,
     events: Vec<(u64, String, Vec<affinidi_keri_core::SadValue>)>,
+    /// The replayed key state's configuration traits.
+    traits: Vec<String>,
+}
+
+impl VerifiedDelegator {
+    fn of(r: &Replay, events: &[ParsedMessage]) -> Self {
+        Self {
+            prefix: r.kever.state().prefix.clone(),
+            events: events
+                .iter()
+                .map(|m| {
+                    let seals = m.serder.sad()["a"].as_array().cloned().unwrap_or_default();
+                    (m.serder.sn().unwrap(), m.serder.said().unwrap(), seals)
+                })
+                .collect(),
+            traits: r.kever.state().config.clone(),
+        }
+    }
 }
 
 impl DelegatorAnchors for VerifiedDelegator {
@@ -321,6 +339,10 @@ impl DelegatorAnchors for VerifiedDelegator {
             .iter()
             .find(|(s, d, _)| *s == sn && d == said)
             .map(|(_, _, seals)| seals.clone()))
+    }
+
+    fn delegator_traits(&self, delegator: &str) -> Result<Option<Vec<String>>, CoreError> {
+        Ok((delegator == self.prefix).then(|| self.traits.clone()))
     }
 }
 
@@ -340,16 +362,7 @@ fn v2_native_delegated() {
     let r = replay(&theirs);
     assert!(r.refused.is_none(), "{:?}", r.refused);
     assert_state("delegator", &r, &json["delegator"]);
-    let anchors = VerifiedDelegator {
-        prefix: delegator.into(),
-        events: theirs
-            .iter()
-            .map(|m| {
-                let seals = m.serder.sad()["a"].as_array().cloned().unwrap_or_default();
-                (m.serder.sn().unwrap(), m.serder.said().unwrap(), seals)
-            })
-            .collect(),
-    };
+    let anchors = VerifiedDelegator::of(&r, &theirs);
 
     // The delegate: its dip and drt each name the anchoring event.
     let proof = |m: &ParsedMessage| {
@@ -568,7 +581,11 @@ fn every_fixture_is_covered() {
             "v1-basic",
             "v2-basic",
             "v2-basic-native",
+            "v2-dnd-delegator",
             "v2-endorsed-replies",
+            "v2-eo-in-rotation",
+            "v2-eo-interaction",
+            "v2-eo-rotation",
             "v2-multisig-2of3",
             "v2-native-delegated",
             "v2-native-messages",
@@ -583,4 +600,89 @@ fn every_fixture_is_covered() {
         ],
         "a fixture was added or removed: give it a test above"
     );
+}
+
+#[test]
+fn an_establishment_only_identifier_has_no_interaction_events() {
+    // KERI spec, Configuration traits field: under `EO` a validator drops any
+    // non-establishment event. keripy stops before the ixn; so do we.
+    let f = fixture("v2-eo-interaction");
+    assert_eq!(f.expect, "refuse-event-1");
+    let published = replay(&parser::parse_all(&f.published).unwrap());
+    assert!(published.refused.is_none());
+    assert_state("eo (published)", &published, &f.keripy);
+
+    let r = replay(&parser::parse_all(f.submitted.as_ref().unwrap()).unwrap());
+    match &r.refused {
+        Some((1, CoreError::Validation(e))) if e.contains("EO") => {}
+        other => panic!("the ixn must be refused as EO, got {other:?}"),
+    }
+    assert_state("eo (submitted)", &r, &f.keripy);
+}
+
+#[test]
+fn an_establishment_only_identifier_rotates() {
+    accepts("v2-eo-rotation");
+}
+
+#[test]
+fn inception_only_traits_in_a_rotation_change_nothing() {
+    // `EO` and `DND` in a rotation's `c`: keripy accepts the rotation and the
+    // ixn after it, applying traits only at inception. So do we.
+    accepts("v2-eo-in-rotation");
+    let f = fixture("v2-eo-in-rotation");
+    let r = replay(&parser::parse_all(&f.published).unwrap());
+    assert!(
+        r.kever.state().config.is_empty(),
+        "{:?}",
+        r.kever.state().config
+    );
+}
+
+#[test]
+fn a_delegator_with_dnd_delegates_nothing() {
+    // keripy drops a dip whose delegator has `DND`, though the delegator
+    // anchors it.
+    let f = fixture("v2-dnd-delegator");
+    assert_eq!(f.expect, "refuse-dip");
+    assert!(f.keripy.is_null());
+    let json: Value =
+        serde_json::from_slice(&std::fs::read(dir().join("v2-dnd-delegator.json")).unwrap())
+            .unwrap();
+    let messages = parser::parse_all(&f.published).unwrap();
+    let delegator = json["delegator"]["prefix"].as_str().unwrap();
+    let (theirs, ours): (Vec<_>, Vec<_>) = messages
+        .into_iter()
+        .partition(|m| m.serder.prefix().unwrap() == delegator);
+
+    let r = replay(&theirs);
+    assert!(r.refused.is_none(), "{:?}", r.refused);
+    assert_state("dnd delegator", &r, &json["delegator"]);
+    assert_eq!(r.kever.state().config, vec!["DND".to_string()]);
+    let anchors = VerifiedDelegator::of(&r, &theirs);
+
+    let dip = &ours[0];
+    let [(sn, said)] = dip.seal_source_couples() else {
+        panic!("one seal source couple");
+    };
+    let proof = DelegationProof::from_seal_source_couple(sn, said).unwrap();
+    let verfers: Vec<Verfer> = dip.serder.sad()["k"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|k| Verfer::from_qb64(k.as_str().unwrap()).unwrap())
+        .collect();
+    match Kever::new_delegated(
+        &dip.serder,
+        dip.controller_sigs(),
+        &verfers,
+        &proof,
+        &anchors,
+    ) {
+        Err(CoreError::Validation(e)) if e.contains("DND") => {}
+        other => panic!(
+            "the dip must be refused for DND, got {:?}",
+            other.map(|_| ())
+        ),
+    }
 }
