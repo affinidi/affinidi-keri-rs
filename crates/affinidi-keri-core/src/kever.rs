@@ -58,6 +58,7 @@ impl Kever {
         // Verify SAID integrity before trusting any event fields
         serder.verify_said("E")?;
 
+        check_shape(serder.sad(), "icp")?;
         // Parse the inception event from the SAD
         let icp: InceptionEvent = serder.sad().deserialize_into().map_err(CoreError::Json)?;
 
@@ -126,6 +127,7 @@ impl Kever {
         // Verify SAID integrity before trusting any event fields
         serder.verify_said("E")?;
 
+        check_shape(serder.sad(), "dip")?;
         let dip: DelegatedInceptionEvent =
             serder.sad().deserialize_into().map_err(CoreError::Json)?;
 
@@ -191,6 +193,7 @@ impl Kever {
         // Verify SAID integrity before trusting any event fields
         said::verify_said(&sad, "d", "E", SerializationKind::Json)?;
 
+        check_shape(&sad, "icp")?;
         let icp: InceptionEvent = sad.deserialize_into().map_err(CoreError::Json)?;
 
         if icp.keys.len() != verfers.len() {
@@ -256,6 +259,7 @@ impl Kever {
         match ilk.as_str() {
             "rot" => {
                 self.reject_plain_rotation_when_delegated()?;
+                check_shape(serder.sad(), "rot")?;
                 let rot: RotationEvent =
                     serder.sad().deserialize_into().map_err(CoreError::Json)?;
                 // A rotation is signed by the keys it INSTALLS, not the ones it
@@ -271,6 +275,7 @@ impl Kever {
                 // current key set under the current threshold.
                 let verfers = self.build_verfers()?;
                 Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
+                check_shape(serder.sad(), "ixn")?;
                 let ixn: InteractionEvent =
                     serder.sad().deserialize_into().map_err(CoreError::Json)?;
                 self.state = self.state.apply_interaction(&ixn)?;
@@ -321,6 +326,7 @@ impl Kever {
         let new_state = match ilk.as_str() {
             "rot" => {
                 self.reject_plain_rotation_when_delegated()?;
+                check_shape(serder.sad(), "rot")?;
                 let rot: RotationEvent =
                     serder.sad().deserialize_into().map_err(CoreError::Json)?;
                 // Signed by the keys it installs — see `update`.
@@ -330,6 +336,7 @@ impl Kever {
             "ixn" => {
                 let verfers = self.build_verfers()?;
                 Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
+                check_shape(serder.sad(), "ixn")?;
                 let ixn: InteractionEvent =
                     serder.sad().deserialize_into().map_err(CoreError::Json)?;
                 self.state.apply_interaction(&ixn)?
@@ -393,6 +400,7 @@ impl Kever {
         let new_state = match ilk.as_str() {
             "rot" => {
                 self.reject_plain_rotation_when_delegated()?;
+                check_shape(&sad, "rot")?;
                 let rot: RotationEvent = sad.deserialize_into().map_err(CoreError::Json)?;
                 // Signed by the keys it installs — see `update`.
                 self.verify_rotation_sigs(raw, sigs, &rot.keys, &rot.keys_threshold.0)?;
@@ -401,6 +409,7 @@ impl Kever {
             "ixn" => {
                 let verfers = self.build_verfers()?;
                 Self::verify_sigs_static(raw, sigs, &verfers, &self.state.threshold)?;
+                check_shape(&sad, "ixn")?;
                 let ixn: InteractionEvent = sad.deserialize_into().map_err(CoreError::Json)?;
                 self.state.apply_interaction(&ixn)?
             }
@@ -701,6 +710,17 @@ impl Kever {
     }
 }
 
+/// Check an event's top-level fields against keripy's list for its type and
+/// protocol version, before any field of it is trusted.
+///
+/// `drt` is not checked: keripy's `drt` has no `di` (and in version 1 no `c`),
+/// while this crate's `DelegatedRotationEvent` requires both — a divergence
+/// to resolve with delegated rotation's own conformance work.
+fn check_shape(sad: &crate::sad::SadValue, ilk: &str) -> Result<(), CoreError> {
+    let major = crate::fields::protocol_major(sad)?;
+    crate::fields::check_keri_fields(sad, major, ilk)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -796,7 +816,6 @@ mod tests {
             "bt": "0",
             "br": [],
             "ba": [],
-            "c": [],
             "a": []
         });
 
@@ -1252,7 +1271,7 @@ mod tests {
                 "v": "KERI10JSON000000_", "t": "rot", "d": "", "i": prefix,
                 "s": format!("{sn:x}"), "p": prior,
                 "kt": kt, "k": keys, "nt": nt, "n": next_keys,
-                "bt": "0", "br": [], "ba": [], "c": [], "a": []
+                "bt": "0", "br": [], "ba": [], "a": []
             })
         };
         fix_version_string(&mut sad);

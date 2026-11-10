@@ -4,6 +4,7 @@ pub mod delegation;
 pub mod error;
 pub mod escrow;
 pub mod event;
+pub mod fields;
 pub mod ilk;
 pub mod kever;
 pub mod key_state;

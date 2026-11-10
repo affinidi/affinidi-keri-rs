@@ -59,7 +59,8 @@ pub struct InceptionEvent {
 
 /// Rotation event body.
 ///
-/// Field order: v, t, d, i, s, p, kt, k, nt, n, bt, br, ba, c, a
+/// Field order: v, t, d, i, s, p, kt, k, nt, n, bt, br, ba, a (version 1);
+/// version 2 adds `c` before `a`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RotationEvent {
     /// Version string.
@@ -101,8 +102,9 @@ pub struct RotationEvent {
     /// Witnesses to add.
     #[serde(rename = "ba")]
     pub backers_add: Vec<String>,
-    /// Configuration traits.
-    #[serde(rename = "c")]
+    /// Configuration traits. A version 2 rotation only: a version 1 `rot`
+    /// has no `c` field, and is read with this empty and written without it.
+    #[serde(rename = "c", default, skip_serializing_if = "Vec::is_empty")]
     pub config: Vec<String>,
     /// Anchored data seals.
     #[serde(rename = "a")]

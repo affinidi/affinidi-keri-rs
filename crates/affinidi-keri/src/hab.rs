@@ -421,7 +421,8 @@ impl Hab {
             "bt": self.backer_threshold.to_string(),
             "br": config.backers_remove,
             "ba": config.backers_add,
-            "c": [],
+            // A version 1 `rot` has no `c` field; keripy refuses one that
+            // carries it ("Invalid top level field list").
             "a": []
         });
 

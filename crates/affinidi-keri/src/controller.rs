@@ -572,7 +572,8 @@ impl ControllerState {
             "bt": backer_threshold.to_string(),
             "br": rotation.backers_remove,
             "ba": rotation.backers_add,
-            "c": [],
+            // A version 1 `rot` has no `c` field; keripy refuses one that
+            // carries it ("Invalid top level field list").
             "a": []
         });
         let (said, raw) = saidify(sad)?;
