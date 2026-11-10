@@ -119,7 +119,8 @@ mod tests {
         let siger = Siger::new("A", 0, None, raw.clone()).unwrap();
         assert_eq!(siger.code(), "A");
         assert_eq!(siger.index(), 0);
-        assert_eq!(siger.ondex(), None);
+        // Both lists at the same position.
+        assert_eq!(siger.ondex(), Some(0));
         assert_eq!(siger.raw(), raw.as_slice());
     }
 
@@ -170,10 +171,15 @@ mod tests {
 
     #[test]
     fn test_siger_both_code() {
+        // A key at different positions in the two lists needs a big code.
         let raw = vec![0x77u8; 64];
-        let siger = Siger::new("B", 1, Some(2), raw).unwrap();
-        assert_eq!(siger.code(), "B");
-        assert_eq!(siger.index(), 1);
-        assert_eq!(siger.ondex(), Some(2));
+        let siger = Siger::new("2A", 1, Some(2), raw.clone()).unwrap();
+        assert_eq!(siger.code(), "2A");
+        assert_eq!((siger.index(), siger.ondex()), (1, Some(2)));
+        assert!(Siger::new("A", 1, Some(2), raw.clone()).is_err());
+        // Current only: no ondex.
+        let siger = Siger::new("B", 1, None, raw.clone()).unwrap();
+        assert_eq!(siger.ondex(), None);
+        assert!(Siger::new("B", 1, Some(2), raw).is_err());
     }
 }

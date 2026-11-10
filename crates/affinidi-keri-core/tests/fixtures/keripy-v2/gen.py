@@ -192,6 +192,26 @@ def weighted(outdir):
              note="kt 2 over three keys; icp signed by keys 0 and 2, ixn by 1 and 2")
 
 
+def reordered(outdir):
+    """A rotation whose new keys are in a different order from the prior
+    next-key list, plus a key the prior event did not commit to. keripy signs
+    each committed key with `2A` (both lists, its own ondex) and the new key
+    current-only (`B`, no ondex). A reader must take the ondex from the code."""
+    r, a, b, x, n1, n2, n3 = keys(7, "reordered")
+    icp = incept(code=DigDex.Blake3_256, keys=[r.verfer.qb64], ndigs=[ndig(a), ndig(b)], nsith="2", kind=KIND)
+    pre = icp.pre
+    rot = rotate(pre=pre, keys=[b.verfer.qb64, a.verfer.qb64, x.verfer.qb64], dig=icp.said, isith="2",
+                 ndigs=[ndig(n1), ndig(n2), ndig(n3)], nsith="2", sn=1, kind=KIND)
+    sigers = [b.sign(rot.raw, index=0, ondex=1), a.sign(rot.raw, index=1, ondex=0),
+              x.sign(rot.raw, index=2, only=True)]
+    codes = [(z.code, z.index, z.ondex) for z in sigers]
+    if codes != [("2A", 0, 1), ("2A", 1, 0), ("B", 2, None)]:
+        raise SystemExit(f"v2-reordered-rotation: keripy chose {codes}")
+    msgs = [msg(icp, [(r, 0, None)]), bytes(messagize(rot, sigers=sigers, gvrsn=rot.pvrsn))]
+    scenario(outdir, "v2-reordered-rotation", pre, msgs, genus=Vrsn_2_0, expect="accept",
+             note="rotation to [B, A, X] after n [H(A), H(B)]: A and B sign 2A with their prior positions as ondex, X current-only (B)")
+
+
 def migrated(outdir):
     s = keys(4, "migrated")
     icp = incept(code=DigDex.Blake3_256, keys=[s[0].verfer.qb64], ndigs=[ndig(s[1])], pvrsn=Vrsn_1_0, kind=KIND)
@@ -268,6 +288,7 @@ def main(outdir):
     basic(outdir, Vrsn_2_0, Vrsn_2_0, "v2-basic-native", kind=Kinds.cesr)
     recovery(outdir)
     weighted(outdir)
+    reordered(outdir)
     migrated(outdir)
     downgrade(outdir)
     endorsed(outdir)

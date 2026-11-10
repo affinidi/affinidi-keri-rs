@@ -111,7 +111,7 @@ fn sign_and_compose(serder: &Serder, signers: &[Signer]) -> Result<(Vec<u8>, Vec
     let sigers = signers
         .iter()
         .enumerate()
-        .map(|(i, signer)| signer.sign_indexed(serder.raw(), i, true))
+        .map(|(i, signer)| signer.sign_indexed(serder.raw(), i, false))
         .collect::<Result<Vec<_>, _>>()?;
     let mut sig_bytes = Vec::new();
     for siger in &sigers {
@@ -713,7 +713,7 @@ impl Hab {
             // Transferable: produce indexed signatures
             let mut sig_bytes = Vec::new();
             for (i, signer) in self.signers.iter().enumerate() {
-                let siger = signer.sign_indexed(other_serder.raw(), i, true)?;
+                let siger = signer.sign_indexed(other_serder.raw(), i, false)?;
                 let qb64 = siger.qb64()?;
                 sig_bytes.extend_from_slice(qb64.as_bytes());
             }

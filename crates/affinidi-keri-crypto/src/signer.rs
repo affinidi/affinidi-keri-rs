@@ -114,8 +114,12 @@ impl Signer {
     /// # Arguments
     /// * `message` - The message to sign.
     /// * `index` - The key index in the current signing set.
-    /// * `only` - If true, use the "current only" indexed code (A/C/E).
-    ///   If false, use the "both" indexed code (B/D/F) with `ondex == index`.
+    /// * `only` - As keripy's `Signer.sign`: true signs current-only (`B`,
+    ///   `D`, `F`): the key is not in the prior next-key list, and the
+    ///   signature counts towards no prior next threshold. False signs for
+    ///   both lists at the same position (`A`, `C`, `E`, `ondex == index`),
+    ///   which is what an inception, interaction or rotation that keeps its
+    ///   committed keys in order needs, and keripy's default.
     pub fn sign_indexed(
         &self,
         message: &[u8],
@@ -254,18 +258,18 @@ impl Signer {
     /// Get the Siger "current only" indexed signature CESR code.
     fn siger_current_code(&self) -> &str {
         match self.algorithm() {
-            Algorithm::Ed25519 => "A",
-            Algorithm::Secp256k1 => "C",
-            Algorithm::Secp256r1 => "E",
+            Algorithm::Ed25519 => "B",
+            Algorithm::Secp256k1 => "D",
+            Algorithm::Secp256r1 => "F",
         }
     }
 
     /// Get the Siger "both" indexed signature CESR code.
     fn siger_both_code(&self) -> &str {
         match self.algorithm() {
-            Algorithm::Ed25519 => "B",
-            Algorithm::Secp256k1 => "D",
-            Algorithm::Secp256r1 => "F",
+            Algorithm::Ed25519 => "A",
+            Algorithm::Secp256k1 => "C",
+            Algorithm::Secp256r1 => "E",
         }
     }
 }
@@ -318,18 +322,18 @@ mod tests {
         assert!(cigar.verify(message).unwrap());
         assert!(!cigar.verify(b"wrong").unwrap());
 
-        // Indexed signature (current only)
-        let siger = signer.sign_indexed(message, 0, true).unwrap();
-        assert_eq!(siger.code(), "A");
-        assert_eq!(siger.index(), 0);
-        assert_eq!(siger.ondex(), None);
-        assert!(siger.verify(message).unwrap());
-
-        // Indexed signature (both)
+        // Both lists, at the same position: keripy's default.
         let siger = signer.sign_indexed(message, 2, false).unwrap();
-        assert_eq!(siger.code(), "B");
+        assert_eq!(siger.code(), "A");
         assert_eq!(siger.index(), 2);
         assert_eq!(siger.ondex(), Some(2));
+        assert!(siger.verify(message).unwrap());
+
+        // Current only: in no prior next-key list.
+        let siger = signer.sign_indexed(message, 0, true).unwrap();
+        assert_eq!(siger.code(), "B");
+        assert_eq!(siger.index(), 0);
+        assert_eq!(siger.ondex(), None);
         assert!(siger.verify(message).unwrap());
     }
 
@@ -362,8 +366,10 @@ mod tests {
         assert!(cigar.verify(message).unwrap());
         assert!(!cigar.verify(b"wrong").unwrap());
 
-        let siger = signer.sign_indexed(message, 1, true).unwrap();
+        let siger = signer.sign_indexed(message, 1, false).unwrap();
         assert_eq!(siger.code(), "C");
+        let siger = signer.sign_indexed(message, 1, true).unwrap();
+        assert_eq!(siger.code(), "D");
         assert!(siger.verify(message).unwrap());
     }
 
@@ -390,6 +396,8 @@ mod tests {
         assert!(!cigar.verify(b"wrong").unwrap());
 
         let siger = signer.sign_indexed(message, 0, false).unwrap();
+        assert_eq!(siger.code(), "E");
+        let siger = signer.sign_indexed(message, 0, true).unwrap();
         assert_eq!(siger.code(), "F");
         assert!(siger.verify(message).unwrap());
     }

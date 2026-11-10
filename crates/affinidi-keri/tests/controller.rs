@@ -70,7 +70,7 @@ fn compose_unchecked(pending: &PendingEvent, signers: &[(usize, &Signer)]) -> Ve
     let serder = Serder::from_raw(&raw).unwrap();
     let sigers: Vec<_> = signers
         .iter()
-        .map(|(i, s)| s.sign_indexed(&raw, *i, true).unwrap())
+        .map(|(i, s)| s.sign_indexed(&raw, *i, false).unwrap())
         .collect();
     compose_event(&serder, &sigers).unwrap()
 }

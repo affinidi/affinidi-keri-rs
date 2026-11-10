@@ -322,6 +322,29 @@ fn endorsed_replies_are_composed_as_keripy_composes_them() {
 }
 
 #[test]
+fn a_rotation_reordering_its_committed_keys_verifies() {
+    // keripy signs a key whose prior position differs from its new one with
+    // `2A` (both lists, its own ondex), and a key the prior event did not
+    // commit to current-only (`B`). The ondex comes from the code.
+    accepts("v2-reordered-rotation");
+    let f = fixture("v2-reordered-rotation");
+    let messages = parser::parse_all(&f.published).unwrap();
+    let sigs: Vec<(String, usize, Option<usize>)> = messages[1]
+        .controller_sigs()
+        .iter()
+        .map(|s| (s.code().to_string(), s.index(), s.ondex()))
+        .collect();
+    assert_eq!(
+        sigs,
+        [
+            ("2A".to_string(), 0, Some(1)),
+            ("2A".to_string(), 1, Some(0)),
+            ("B".to_string(), 2, None),
+        ]
+    );
+}
+
+#[test]
 fn every_fixture_is_covered() {
     let mut names: Vec<String> = std::fs::read_dir(dir())
         .unwrap()
@@ -344,6 +367,7 @@ fn every_fixture_is_covered() {
             "v2-recovery-by-k",
             "v2-recovery-by-r-and-k",
             "v2-recovery-routine-alone",
+            "v2-reordered-rotation",
         ],
         "a fixture was added or removed: give it a test above"
     );

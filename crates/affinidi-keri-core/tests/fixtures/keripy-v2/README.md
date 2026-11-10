@@ -36,6 +36,11 @@ moving to a newer keripy commit is a behaviour change to review.
 - **A migrated log is republished under one v2 genus.** `migrated-v1-to-v2.cesr`
   opens with the v2 genus counter, and its v1 events carry v2 attachment groups.
   Attachments follow the stream's genus; each body carries its own version.
+- **A rotation may reorder, reveal part of, or add to its committed keys.** In
+  `v2-reordered-rotation.cesr` the new keys are `[B, A, X]` after
+  `n = [H(A), H(B)]`: keripy signs B and A with `2A` (both lists, ondex 1 and
+  0) and the uncommitted X current-only (`B`). The prior `nt` is met by the
+  committed positions the signatures expose, not by the key list's shape.
 - **A 2.x endorsement writes its sequence number as a `Number`.** In
   `v2-endorsed-replies.cesr` the `-X` group names the establishment event at
   sn 1 as `MAAB` (the smallest `Number` code), where 1.x writes a 24-character
