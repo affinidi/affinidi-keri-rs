@@ -1,0 +1,23 @@
+{
+  "expect": "accept",
+  "note": "icp, ixn (one digest seal), rot, ixn; single Ed25519 key; KERI 2.0, JSON bodies",
+  "ours": {
+    "establishment": {
+      "said": "EMihEcmfmBUTcv-u3sb8MkYoBR8_HZIUFCXBWlXsvRxO",
+      "sn": 2
+    },
+    "ilk": "ixn",
+    "keys": [
+      "DH0dP7k75zfWlrG5UmoqePteJWQIsRwbJiOiqer3Geky"
+    ],
+    "kt": "1",
+    "n": [
+      "EBMIMSDYKODjFn9ltnS0eWKkSIH6RR3zIGRtKmdX5L1p"
+    ],
+    "nt": "1",
+    "prefix": "EGH7Ml-2gz-aiI7yCrUTA8gnMqLZEjKGzrdz-s-NssLx",
+    "said": "EKcYHwde0XCDkeXob669JehUsm1psnSboNyCtFVb5MNy",
+    "sn": 3,
+    "version": "2.0"
+  }
+}

@@ -21,6 +21,12 @@ pub struct InceptionConfig {
     pub config_traits: Vec<String>,
     /// Optional salt for key derivation; uses random if None.
     pub salt: Option<Vec<u8>>,
+    /// The protocol version the log is written in, default version 1.
+    ///
+    /// `Hab` defaults to version 1, unlike the controller: its direct-mode,
+    /// receipt and witness flows and its store replay are built on version 1
+    /// attachments, and are not yet written in version 2.
+    pub version: crate::ProtocolVersion,
 }
 
 impl Default for InceptionConfig {
@@ -36,6 +42,7 @@ impl Default for InceptionConfig {
             backers: Vec::new(),
             config_traits: Vec::new(),
             salt: None,
+            version: crate::ProtocolVersion::V1,
         }
     }
 }
@@ -112,6 +119,12 @@ impl InceptionConfigBuilder {
     /// Set the salt for key derivation.
     pub fn salt(mut self, salt: Vec<u8>) -> Self {
         self.config.salt = Some(salt);
+        self
+    }
+
+    /// Set the protocol version the log is written in.
+    pub fn version(mut self, version: crate::ProtocolVersion) -> Self {
+        self.config.version = version;
         self
     }
 

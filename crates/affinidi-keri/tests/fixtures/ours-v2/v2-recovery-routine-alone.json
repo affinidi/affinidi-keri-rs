@@ -1,0 +1,27 @@
+{
+  "expect": "refuse-rotation",
+  "note": "rotation signed by R' alone, composed without the controller's check: meets kt, not the prior nt; a verifier stops at sn 1",
+  "ours": {
+    "establishment": {
+      "said": "EC5BMyCujIq18NUHcvk_tE0hlAOy-Oy4H76rOXTY9cI5",
+      "sn": 0
+    },
+    "ilk": "ixn",
+    "keys": [
+      "DETXnIqQ1xSGxNAkIpoJZN8uK_FDXWTcxKusYpm-RXvh"
+    ],
+    "kt": "1",
+    "n": [
+      "EFvf4ucoJlQbDlC3DWJ2uuElS7m1oYVc0rokGlgeaiHZ",
+      "ECSNbbN4Babdb8hq9N0iKLB4DNDplWmtlHTGaLyF2cEa"
+    ],
+    "nt": [
+      "1/2",
+      "1"
+    ],
+    "prefix": "EC5BMyCujIq18NUHcvk_tE0hlAOy-Oy4H76rOXTY9cI5",
+    "said": "EMfQKvmrsiny4bDOH52_g8LvuM6JTRhjgohVSFiANvAs",
+    "sn": 1,
+    "version": "2.0"
+  }
+}

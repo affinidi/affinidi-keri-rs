@@ -2,12 +2,10 @@
 //! held by someone else: every event is checked by `Kever`, the verifier every
 //! reader of the log runs, not only by `PendingEvent::finish`.
 
-use affinidi_cesr::Counter;
 use affinidi_keri::controller::{
     ControllerState, Inception, KeySigner, NextKey, PendingEvent, Rotation, incept,
 };
-use affinidi_keri_core::composer::counter_code_for;
-use affinidi_keri_core::counter_table::GroupKind;
+use affinidi_keri_core::composer::compose_event;
 use affinidi_keri_core::kever::Kever;
 use affinidi_keri_core::parser::{Attachment, parse_all};
 use affinidi_keri_core::serder::Serder;
@@ -70,25 +68,11 @@ fn verify(log: &[Vec<u8>]) -> Result<Kever, CoreError> {
 fn compose_unchecked(pending: &PendingEvent, signers: &[(usize, &Signer)]) -> Vec<u8> {
     let raw = pending.signing_input().to_vec();
     let serder = Serder::from_raw(&raw).unwrap();
-    let code = counter_code_for(&serder, GroupKind::ControllerIdxSigs).unwrap();
-    let mut out = raw.clone();
-    out.extend_from_slice(
-        Counter::new(code, signers.len())
-            .unwrap()
-            .qb64()
-            .unwrap()
-            .as_bytes(),
-    );
-    for (i, s) in signers {
-        out.extend_from_slice(
-            s.sign_indexed(&raw, *i, true)
-                .unwrap()
-                .qb64()
-                .unwrap()
-                .as_bytes(),
-        );
-    }
-    out
+    let sigers: Vec<_> = signers
+        .iter()
+        .map(|(i, s)| s.sign_indexed(&raw, *i, true).unwrap())
+        .collect();
+    compose_event(&serder, &sigers).unwrap()
 }
 
 struct Identity {

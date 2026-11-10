@@ -1,0 +1,41 @@
+{
+  "expect": "accept",
+  "note": "ten keys at kt and nt ten, written \"a\" as keripy reads a threshold (hex)",
+  "ours": {
+    "establishment": {
+      "said": "ELuRdqvzpXz2lanwHiC93hZYK4TMNCrWpKz77TRm55UX",
+      "sn": 0
+    },
+    "ilk": "ixn",
+    "keys": [
+      "DOtnGg3O1LJ9lbooEZAk1YEtN7ueIlMzUUpbfPuF79pF",
+      "DNSXSNouTGZEZ7mlAps7_D6tzHaAr5W7VBXzOqeWMOOU",
+      "DPhVq4Zt0YhTi_OQzbqeQ7dVKYhO9lnLGl3Wj5R-r0LX",
+      "DCzE6RFe15-2LeS8BhfOVHZ4CIFMJmd1wdnPn0MFOHSG",
+      "DLyDCbbF71GyEFtRyWX8jFSFC2dSfKQSHIWAT8_e5bcg",
+      "DGYTHru5gctPL9cxLJr19piU10VptabJsk0dLnAgjW0k",
+      "DOwkuRCg-CopdVv--WjLvrChvVJfcUAPkFbKAve-DNH_",
+      "DM8oHzbex73lTg-3BLqEStB9R1pGVTuRb4ETDSzZ9kN3",
+      "DL1Xbpcex4pGgDXH2nsRQRi0bkfVQ9xtpZLs0zhlQEBN",
+      "DFslXTYj1Uu5bRomaqZIqBEjnRWSqvn0_Wx9McjD99Gj"
+    ],
+    "kt": "a",
+    "n": [
+      "EJqzZgkcZLSSkpIDxxJFQFbbpMgO_38VtzbP4LQixz6W",
+      "EEm3Z7tpKZraSMCfZFsdaM67Z_9BdcH10C7DNSdxf--s",
+      "EJ3b6iyzLoa6Jd147d5Y-3DWX7qdZjGu1TqzXRl4T_dY",
+      "ENoO6jSV33Rk3WKEzucF0eYoFO_mpqqrRnvBf-k-HGj6",
+      "EGXkuP6KykfBUFENNy9iofIQkJFtrKjfrrkPQ4Z3FZ1W",
+      "EBv4eUttX8QewSKtyIHCAnB_9hChTc9H7DHEiZrBwauR",
+      "EA_cDwHr_3yeyQJWIvaUnK5TgPwri3ivkyTOl_orde99",
+      "EAFKitmxx06Sxx50EaHEKsK6U7PCEi9JPoQu0u35-QbE",
+      "ED4S6h9S8o5R__mvUKdRo3ft0uf3d2qYRGF6q3Uradwp",
+      "ELd0K5jYzt9ETyK7IycU7Y5GF63bSI6MfQwt4aT_h5RW"
+    ],
+    "nt": "a",
+    "prefix": "ELuRdqvzpXz2lanwHiC93hZYK4TMNCrWpKz77TRm55UX",
+    "said": "EPdS34GLQdsVAxuveDXsn75F-xo67d2vAX0ZH0muE0U_",
+    "sn": 1,
+    "version": "2.0"
+  }
+}

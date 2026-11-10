@@ -1,0 +1,28 @@
+{
+  "expect": "accept",
+  "note": "rotation signed by the recovery key K alone meets the prior nt",
+  "ours": {
+    "establishment": {
+      "said": "EA1f9wje7flOdw5WinlfMow46PmUCQJstjclUnwEUPvL",
+      "sn": 2
+    },
+    "ilk": "rot",
+    "keys": [
+      "DFtAdTioU7o83kmkZgDnmR88LeLtO8AM9jlRIkdvePtY",
+      "DOf36uW_oIjvdStLEfihz8HwmUBQRYCYjeas0i2Yl4wr"
+    ],
+    "kt": "1",
+    "n": [
+      "EPT26YO3HmtKgUJRYU4DKnVJewzmog2I2aljpIsR7gFM",
+      "EAZSoiwFnQvUsT893ajq0TkX1islWUBpWKBdfcUp3p_a"
+    ],
+    "nt": [
+      "1/2",
+      "1"
+    ],
+    "prefix": "EC5BMyCujIq18NUHcvk_tE0hlAOy-Oy4H76rOXTY9cI5",
+    "said": "EA1f9wje7flOdw5WinlfMow46PmUCQJstjclUnwEUPvL",
+    "sn": 2,
+    "version": "2.0"
+  }
+}

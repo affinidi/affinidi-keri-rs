@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{InceptionConfig, RotationConfig};
 use crate::error::KeriError;
+use crate::protocol::ProtocolVersion;
 
 /// A single KERI identifier manager.
 ///
@@ -56,6 +57,8 @@ pub struct Hab {
     backer_threshold: usize,
     /// Current backer (witness) prefixes.
     backers: Vec<String>,
+    /// The protocol version the next event is written in.
+    version: ProtocolVersion,
 }
 
 /// Fix the version string in a SAD so the embedded size matches the actual
@@ -79,15 +82,43 @@ pub(crate) fn fix_version_string(sad: &mut affinidi_keri_core::SadValue) -> Resu
         sad["i"] = affinidi_keri_core::SadValue::String(placeholder);
     }
 
+    // The version string already in `v` says which version this event is;
+    // each version's string has a fixed length, so sizing with it in place is
+    // exact.
+    let mut version = sad
+        .get("v")
+        .and_then(|v| v.as_str())
+        .map(affinidi_keri_core::version::Version::parse_str)
+        .transpose()?
+        .ok_or_else(|| KeriError::Config("event has no version string".into()))?;
+
     let temp_raw = serde_json::to_vec(sad)
         .map_err(|e| KeriError::Core(affinidi_keri_core::CoreError::Json(e)))?;
-    sad["v"] = affinidi_keri_core::SadValue::String(format!("KERI10JSON{:06x}_", temp_raw.len()));
+    version.size = temp_raw.len();
+    sad["v"] = affinidi_keri_core::SadValue::String(version.to_version_string());
 
     // Restore originals for compute_said
     sad["d"] = orig_d;
     sad["i"] = orig_i;
 
     Ok(())
+}
+
+/// Sign `serder` with `signers` (indexed by position) and compose it in its
+/// own version's framing. Returns the concatenated signatures and the
+/// composed message.
+fn sign_and_compose(serder: &Serder, signers: &[Signer]) -> Result<(Vec<u8>, Vec<u8>), KeriError> {
+    let sigers = signers
+        .iter()
+        .enumerate()
+        .map(|(i, signer)| signer.sign_indexed(serder.raw(), i, true))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut sig_bytes = Vec::new();
+    for siger in &sigers {
+        sig_bytes.extend_from_slice(siger.qb64()?.as_bytes());
+    }
+    let composed = affinidi_keri_core::composer::compose_event(serder, &sigers)?;
+    Ok((sig_bytes, composed))
 }
 
 /// Everything needed to resume signing for an identifier, **except the salt**.
@@ -133,6 +164,10 @@ pub struct HabState {
     pub backer_threshold: usize,
     /// Witness prefixes.
     pub backers: Vec<String>,
+    /// The protocol version the next event is written in. A state persisted
+    /// before 0.6 names none, and its log is version 1.
+    #[serde(default = "ProtocolVersion::legacy")]
+    pub version: ProtocolVersion,
 }
 
 /// A signed event, before anything has been persisted.
@@ -228,15 +263,16 @@ impl Hab {
             .collect::<Result<Vec<_>, _>>()?;
 
         // Build inception SAD with proper field ordering
+        // Thresholds are hex, as keripy reads and writes them.
         let mut sad = affinidi_keri_core::sad!({
-            "v": "KERI10JSON000000_",
+            "v": config.version.placeholder(),
             "t": "icp",
             "d": "",
             "i": "",
             "s": "0",
-            "kt": config.threshold.to_string(),
+            "kt": format!("{:x}", config.threshold),
             "k": keys,
-            "nt": config.next_threshold.to_string(),
+            "nt": format!("{:x}", config.next_threshold),
             "n": next_key_digests,
             "bt": format!("{:x}", config.backer_threshold),
             "b": config.backers,
@@ -253,26 +289,9 @@ impl Hab {
         // Create Serder from the SAD
         let serder = Serder::new(SerializationKind::Json, sad)?;
 
-        // Sign the event with all current signers (indexed signatures)
-        let mut sig_bytes = Vec::new();
-        for (i, signer) in signers.iter().enumerate() {
-            let siger = signer.sign_indexed(serder.raw(), i, true)?;
-            let qb64 = siger.qb64()?;
-            sig_bytes.extend_from_slice(qb64.as_bytes());
-        }
-
-        // Build counter for controller indexed signatures. The code comes
-        // from the event's own protocol version so that composing and parsing
-        // cannot drift apart.
-        let code = counter_code_for(&serder, GroupKind::ControllerIdxSigs)?;
-        let counter = Counter::new(code, signers.len())?;
-        let counter_qb64 = counter.qb64()?;
-
-        // Compose the full message: event + counter + signatures
-        let mut composed = Vec::new();
-        composed.extend_from_slice(serder.raw());
-        composed.extend_from_slice(counter_qb64.as_bytes());
-        composed.extend_from_slice(&sig_bytes);
+        // Sign the event with all current signers (indexed signatures), and
+        // compose it in its own version's framing.
+        let (sig_bytes, composed) = sign_and_compose(&serder, &signers)?;
 
         let prefix = computed_said.clone();
 
@@ -296,6 +315,7 @@ impl Hab {
             "sn": 0,
             "backer_threshold": config.backer_threshold,
             "backers": config.backers,
+            "version": config.version,
         });
         let hab_bytes =
             serde_json::to_vec(&hab_data).map_err(|e| KeriError::Config(e.to_string()))?;
@@ -326,6 +346,7 @@ impl Hab {
             next_gen: 1,
             backer_threshold: config.backer_threshold,
             backers: config.backers.clone(),
+            version: config.version,
         };
 
         Ok((
@@ -407,24 +428,44 @@ impl Hab {
             .collect::<Result<Vec<_>, _>>()?;
 
         // Build rotation SAD
-        let mut sad = affinidi_keri_core::sad!({
-            "v": "KERI10JSON000000_",
-            "t": "rot",
-            "d": "",
-            "i": self.prefix,
-            "s": format!("{new_sn:x}"),
-            "p": self.last_said,
-            "kt": config.threshold.to_string(),
-            "k": keys,
-            "nt": config.next_threshold.to_string(),
-            "n": next_key_digests,
-            "bt": format!("{:x}", self.backer_threshold),
-            "br": config.backers_remove,
-            "ba": config.backers_add,
+        let mut sad = match self.version {
             // A version 1 `rot` has no `c` field; keripy refuses one that
             // carries it ("Invalid top level field list").
-            "a": []
-        });
+            ProtocolVersion::V1 => affinidi_keri_core::sad!({
+                "v": self.version.placeholder(),
+                "t": "rot",
+                "d": "",
+                "i": self.prefix,
+                "s": format!("{new_sn:x}"),
+                "p": self.last_said,
+                "kt": format!("{:x}", config.threshold),
+                "k": keys,
+                "nt": format!("{:x}", config.next_threshold),
+                "n": next_key_digests,
+                "bt": format!("{:x}", self.backer_threshold),
+                "br": config.backers_remove,
+                "ba": config.backers_add,
+                "a": []
+            }),
+            // Version 2 adds `c` after `ba` (keripy serdering.py, v2 `rot`).
+            ProtocolVersion::V2 => affinidi_keri_core::sad!({
+                "v": self.version.placeholder(),
+                "t": "rot",
+                "d": "",
+                "i": self.prefix,
+                "s": format!("{new_sn:x}"),
+                "p": self.last_said,
+                "kt": format!("{:x}", config.threshold),
+                "k": keys,
+                "nt": format!("{:x}", config.next_threshold),
+                "n": next_key_digests,
+                "bt": format!("{:x}", self.backer_threshold),
+                "br": config.backers_remove,
+                "ba": config.backers_add,
+                "c": [],
+                "a": []
+            }),
+        };
 
         // Fix version string size before computing SAID
         fix_version_string(&mut sad)?;
@@ -440,23 +481,7 @@ impl Hab {
         // outgoing keys is not what KERI defines and is not what keripy
         // accepts: possession of the pre-rotated keys is the whole proof of
         // authority to rotate.
-        let mut sig_bytes = Vec::new();
-        for (i, signer) in new_signers.iter().enumerate() {
-            let siger = signer.sign_indexed(serder.raw(), i, true)?;
-            let qb64 = siger.qb64()?;
-            sig_bytes.extend_from_slice(qb64.as_bytes());
-        }
-
-        // Build counter
-        let code = counter_code_for(&serder, GroupKind::ControllerIdxSigs)?;
-        let counter = Counter::new(code, new_signers.len())?;
-        let counter_qb64 = counter.qb64()?;
-
-        // Compose message
-        let mut composed = Vec::new();
-        composed.extend_from_slice(serder.raw());
-        composed.extend_from_slice(counter_qb64.as_bytes());
-        composed.extend_from_slice(&sig_bytes);
+        let (sig_bytes, composed) = sign_and_compose(&serder, &new_signers)?;
 
         // Store event, KEL, first-seen, signatures in one transaction
         if let Some(store) = store {
@@ -496,6 +521,23 @@ impl Hab {
         })
     }
 
+    /// Write every later event in `version`. A log may move up a version but
+    /// never down.
+    ///
+    /// # Errors
+    /// Returns [`KeriError::Config`] if `version` is below the log's current
+    /// version.
+    pub fn upgrade(&mut self, version: ProtocolVersion) -> Result<(), KeriError> {
+        version.check_from(self.version)?;
+        self.version = version;
+        Ok(())
+    }
+
+    /// The protocol version the next event is written in.
+    pub fn version(&self) -> ProtocolVersion {
+        self.version
+    }
+
     /// The state needed to resume this identifier later, minus the salt.
     ///
     /// Persist this alongside the key event log; keep the salt wherever the
@@ -515,6 +557,7 @@ impl Hab {
             sn: self.sn,
             backer_threshold: self.backer_threshold,
             backers: self.backers.clone(),
+            version: self.version,
         }
     }
 
@@ -563,6 +606,7 @@ impl Hab {
             next_gen: state.next_gen,
             backer_threshold: state.backer_threshold,
             backers: state.backers.clone(),
+            version: state.version,
         })
     }
 
@@ -599,7 +643,7 @@ impl Hab {
 
         // Build interaction SAD
         let mut sad = affinidi_keri_core::sad!({
-            "v": "KERI10JSON000000_",
+            "v": self.version.placeholder(),
             "t": "ixn",
             "d": "",
             "i": self.prefix,
@@ -618,23 +662,7 @@ impl Hab {
         let serder = Serder::new(SerializationKind::Json, sad)?;
 
         // Sign with current signers
-        let mut sig_bytes = Vec::new();
-        for (i, signer) in self.signers.iter().enumerate() {
-            let siger = signer.sign_indexed(serder.raw(), i, true)?;
-            let qb64 = siger.qb64()?;
-            sig_bytes.extend_from_slice(qb64.as_bytes());
-        }
-
-        // Build counter
-        let code = counter_code_for(&serder, GroupKind::ControllerIdxSigs)?;
-        let counter = Counter::new(code, self.signers.len())?;
-        let counter_qb64 = counter.qb64()?;
-
-        // Compose message
-        let mut composed = Vec::new();
-        composed.extend_from_slice(serder.raw());
-        composed.extend_from_slice(counter_qb64.as_bytes());
-        composed.extend_from_slice(&sig_bytes);
+        let (sig_bytes, composed) = sign_and_compose(&serder, &self.signers)?;
 
         // Store event, KEL, first-seen, signatures in one transaction
         if let Some(store) = store {

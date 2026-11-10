@@ -1,0 +1,23 @@
+{
+  "expect": "accept",
+  "note": "v1 icp and ixn, then v2 rot and ixn: a log may move up a version (P2)",
+  "ours": {
+    "establishment": {
+      "said": "EIcDyzvL2btVqC9y0h3c1-Rw1aITFFPYHo_jlfmYZzTG",
+      "sn": 2
+    },
+    "ilk": "ixn",
+    "keys": [
+      "DBeiFkU_jJ4Z5axnpzKd-nzn0WEZf4uiU-NsY8nYCtVH"
+    ],
+    "kt": "1",
+    "n": [
+      "EED3e0WanAzgwERLjQcsXF6Kqy00dDURDadNluD6t7Qw"
+    ],
+    "nt": "1",
+    "prefix": "ECacKe1uaKXXSakUuEkXzJl7lPH8mErzbL0QTo3K1Q0e",
+    "said": "EBoclXc0C-eZ95tzLycNpWn_ipY2L29DDLZPL_XxyTqD",
+    "sn": 3,
+    "version": "2.0"
+  }
+}
