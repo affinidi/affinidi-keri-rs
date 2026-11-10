@@ -1,0 +1,14 @@
+{
+  "note": "issued, then a vacuous (placeholder) update: the latest non-vacuous one rules",
+  "issuer": "EDDXRxvDTDTfSr5WP7s0oiQSe7fCB7cV3-U2TFi-6QjV",
+  "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+  "registry": "EFzdoqPpiH6HtvtvsenWYFUsJR-yI4zakulTUABbJ-SF",
+  "credential": "ELAvp0Q6A1dNNp4IyKAsKEZHlYsDrxAHzpQflalgeqn_",
+  "limit": null,
+  "expect": "issued",
+  "keripy": {
+    "status": "issued",
+    "binding": "mutual",
+    "head": "EMzfBTxVPyR1-DK3puGQbGE-92XAFILz81b4e_vBkwgJ"
+  }
+}

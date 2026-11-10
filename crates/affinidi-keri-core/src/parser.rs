@@ -40,6 +40,24 @@ pub struct TransIdxSigGroup {
     pub sigs: Vec<Siger>,
 }
 
+/// One disclosed blinded state (a `BlindedStateQuadruples` item), each
+/// field kept as qb64 exactly as it appeared in the stream.
+///
+/// Its BLID is the SAID of the four fields concatenated, with `blid` itself
+/// dummied; [`crate::registry`] recomputes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlindedState {
+    /// The BLID: the SAID of this block.
+    pub blid: String,
+    /// The UUID salting the block, or the empty primitive (`1AAP`).
+    pub uuid: String,
+    /// The transaction ACDC's SAID, or the empty primitive for a placeholder.
+    pub acdc: String,
+    /// The transaction state as a CESR label (`0Missued`, `Yrevoked`), or
+    /// the empty primitive for a placeholder.
+    pub state: String,
+}
+
 /// A parsed message consisting of a serialized event and its attachments.
 #[derive(Debug)]
 pub struct ParsedMessage {
@@ -70,6 +88,8 @@ pub enum Attachment {
     SealSourceCouples(Vec<(String, String)>),
     /// Transferable indexed signature groups.
     TransIdxSigGroups(Vec<TransIdxSigGroup>),
+    /// Disclosed blinded states of a blindable registry update (2.x `-a`).
+    BlindedStates(Vec<BlindedState>),
     /// A group whose counter code this parser does not interpret.
     ///
     /// Only produced by [`parse_all_lenient`]; strict parsing rejects the
@@ -471,6 +491,11 @@ fn parse_group(
             offset += n;
             Attachment::SealSourceCouples(couples)
         }
+        GroupKind::BlindedStateQuadruples => {
+            let (states, n) = take(body, table, kind, count, parse_blinded_state)?;
+            offset += n;
+            Attachment::BlindedStates(states)
+        }
         GroupKind::TransIdxSigGroups => {
             let (groups, n) = take(body, table, kind, count, |d| {
                 parse_trans_idx_sig_group(d, table)
@@ -635,6 +660,25 @@ fn parse_qb64_pair(data: &[u8]) -> Result<((String, String), usize), CoreError> 
     Ok(((first, second), a + b))
 }
 
+/// Parse one blinded state quadruple: BLID, UUID, transaction ACDC SAID and
+/// state, each a fixed-size qb64 primitive.
+fn parse_blinded_state(data: &[u8]) -> Result<(BlindedState, usize), CoreError> {
+    let text = ascii(data, "blinded state")?;
+    let (blid, a) = parse_matter_qb64(text, 0, "blinded state BLID")?;
+    let (uuid, b) = parse_matter_qb64(&text[a..], 0, "blinded state UUID")?;
+    let (acdc, c) = parse_matter_qb64(&text[a + b..], 0, "blinded state ACDC")?;
+    let (state, d) = parse_matter_qb64(&text[a + b + c..], 0, "blinded state state")?;
+    Ok((
+        BlindedState {
+            blid,
+            uuid,
+            acdc,
+            state,
+        },
+        a + b + c + d,
+    ))
+}
+
 /// Parse `count` pairs of fixed-size qb64 primitives (1.x item counts).
 #[cfg(test)]
 fn parse_qb64_pairs(
@@ -721,6 +765,17 @@ fn extra_matter_size(code: &str) -> Option<usize> {
         "S" => 16, // Large
         "T" => 20, // Great
         "U" => 24, // Vast
+        // keripy codes affinidi-cesr 0.1.3 does not know, used by blinded
+        // registry state (keripy core/coring.py MtrDex, b70986f).
+        "a" => 44,    // Salt_256 (a blinded state's UUID)
+        "1AAP" => 4,  // Empty
+        "0J" => 4,    // Tag1
+        "0K" => 4,    // Tag2
+        "X" => 4,     // Tag3
+        "0L" => 8,    // Tag5
+        "0M" => 8,    // Tag6
+        "Y" => 8,     // Tag7
+        "1AAN" => 12, // Tag8
         _ => return None,
     })
 }

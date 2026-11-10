@@ -1,0 +1,14 @@
+{
+  "note": "issued, then revoked",
+  "issuer": "EMlmLWeZQmzPb-a7gSlFP3XiWhsbXWO8cyx-K5tM9LaL",
+  "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+  "registry": "ELLEQA8M2NVf1FIHNcdXpG82-sWLrvVkUmW-DTd9CTwu",
+  "credential": "EKgjzo4bu0Argm9hBnu7-5vi418A-rLYlTuNTiYv0L36",
+  "limit": null,
+  "expect": "revoked",
+  "keripy": {
+    "status": "revoked",
+    "binding": "mutual",
+    "head": "EJdUWZ2XY-Bebk4L-nuoYwjJLoUhaZYTAcqvkbdy9xQv"
+  }
+}
