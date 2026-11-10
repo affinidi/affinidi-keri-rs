@@ -1,0 +1,23 @@
+{
+  "note": "v1 icp and ixn, then v2 rot and ixn: a KEL may move up a version (P2)",
+  "expect": "accept",
+  "keripy": {
+    "prefix": "EPYiX1t4HqhZuOIZjgGfzwsi7AVBetXLm1fQP5GOZnmG",
+    "sn": 3,
+    "said": "EDbWcXU-MyEVWzMwDwm1azEldfo8FiYECW9novd28wAP",
+    "ilk": "ixn",
+    "version": "2.0",
+    "keys": [
+      "DG9VUVPM7sboN6qoybMB-dBeaFCDSKwhMxwbWKSWI-46"
+    ],
+    "kt": "1",
+    "n": [
+      "EME3GV23qPaymrbAAG-24b_zoM0AJtaVxzX1Lj1ZLWbz"
+    ],
+    "nt": "1",
+    "establishment": {
+      "sn": 2,
+      "said": "EL88yNelHFdo1euDr2JPyEC5PQS4oOQB5fDkI1PUi9CZ"
+    }
+  }
+}

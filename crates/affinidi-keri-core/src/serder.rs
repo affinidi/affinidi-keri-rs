@@ -77,6 +77,13 @@ impl Serder {
             }
 
             let raw = serialize_value(&sad, kind)?;
+            if raw.len() > final_ver.max_size() {
+                return Err(CoreError::Validation(format!(
+                    "a {}-byte message does not fit the size field of {}",
+                    raw.len(),
+                    final_ver.to_version_string()
+                )));
+            }
 
             return Ok(Self {
                 raw,
@@ -273,6 +280,8 @@ fn extract_version_from_raw(data: &[u8], _kind: SerializationKind) -> Option<Ver
         .filter_map(|proto| window.windows(proto.len()).position(|w| w == *proto))
         .min()?;
 
+    // `Version::parse` tells the 17-character version 1 form from the
+    // 19-character version 2 form by its terminator.
     if pos + KERI_VER_FULLSIZE > data.len() {
         return None;
     }
@@ -311,6 +320,7 @@ fn serialize_value(
         SerializationKind::MsgPack => {
             rmp_serde::to_vec(value).map_err(|e| CoreError::MsgPack(e.to_string()))
         }
+        SerializationKind::Cesr => Err(CoreError::native_cesr_unsupported()),
     }
 }
 
@@ -327,6 +337,7 @@ fn deserialize_value(
         SerializationKind::MsgPack => {
             rmp_serde::from_slice(data).map_err(|e| CoreError::MsgPack(e.to_string()))
         }
+        SerializationKind::Cesr => Err(CoreError::native_cesr_unsupported()),
     }
 }
 
@@ -445,6 +456,27 @@ mod tests {
         assert_eq!(serder2.ilk().unwrap(), "ixn");
         assert_eq!(serder2.prefix().unwrap(), "PREFIX");
         assert_eq!(serder2.sn().unwrap(), 10); // 0xa = 10
+    }
+
+    #[test]
+    fn a_version_2_message_round_trips() {
+        let sad = crate::sad!({
+            "v": "KERICAACAAJSONAAAA.",
+            "t": "ixn",
+            "d": "DIGEST",
+            "i": "PREFIX",
+            "s": "1",
+            "p": "PRIOR",
+            "a": []
+        });
+        let serder = Serder::new(SerializationKind::Json, sad).unwrap();
+        let ver = serder.version.clone().unwrap();
+        assert_eq!((ver.major, ver.genus), (2, Some((2, 0))));
+        assert_eq!(ver.size, serder.raw().len());
+
+        let parsed = Serder::from_raw(serder.raw()).unwrap();
+        assert_eq!(parsed.version, Some(ver));
+        assert_eq!(parsed.ilk().unwrap(), "ixn");
     }
 
     #[test]

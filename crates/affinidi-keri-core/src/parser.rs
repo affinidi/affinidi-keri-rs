@@ -4,11 +4,11 @@
 //! extracting events and their attached signatures grouped by CESR
 //! counter codes.
 
+use affinidi_cesr::Indexer;
 use affinidi_cesr::tables::{hardage, indexer_sizage};
-use affinidi_cesr::{Counter, Indexer};
 use affinidi_keri_crypto::Siger;
 
-use crate::counter_table::{CounterTable, GroupKind};
+use crate::counter_table::{CounterTable, GroupKind, read_counter};
 use crate::error::CoreError;
 use crate::serder::Serder;
 
@@ -147,12 +147,33 @@ impl ParsedMessage {
 
 /// Parse the next message from a byte stream.
 ///
+/// The stream is read as a stream of its own: it is in CESR genus 1.x unless
+/// it opens with a genus-version counter (`-_AAA…`), which this consumes
+/// (did:webs on KERI v2, P1). To keep the genus across calls, use
+/// [`parse_next_in`].
+///
 /// Returns the parsed message and the number of bytes consumed.
 ///
 /// # Errors
 /// Returns `CoreError::ParseError` if the stream cannot be parsed.
 pub fn parse_next(stream: &[u8]) -> Result<(ParsedMessage, usize), CoreError> {
-    parse_next_inner(stream, true)
+    let mut genus = CounterTable::V1;
+    parse_next_inner(stream, &mut genus, true)
+}
+
+/// Parse the next message in a stream whose genus so far is `genus`.
+///
+/// A genus-version counter before the message switches `genus`, and the
+/// message's attachments are read in the result, so pass the same `genus`
+/// back for the next message.
+///
+/// # Errors
+/// Returns `CoreError` if the stream cannot be parsed.
+pub fn parse_next_in(
+    stream: &[u8],
+    genus: &mut CounterTable,
+) -> Result<(ParsedMessage, usize), CoreError> {
+    parse_next_inner(stream, genus, true)
 }
 
 /// Like [`parse_next`], but records an uninterpretable attachment group as
@@ -165,19 +186,55 @@ pub fn parse_next(stream: &[u8]) -> Result<(ParsedMessage, usize), CoreError> {
 /// # Errors
 /// Returns `CoreError::ParseError` if the message body cannot be parsed.
 pub fn parse_next_lenient(stream: &[u8]) -> Result<(ParsedMessage, usize), CoreError> {
-    parse_next_inner(stream, false)
+    let mut genus = CounterTable::V1;
+    parse_next_inner(stream, &mut genus, false)
 }
 
-fn parse_next_inner(stream: &[u8], strict: bool) -> Result<(ParsedMessage, usize), CoreError> {
-    if stream.is_empty() {
-        return Err(CoreError::ParseError("empty stream".into()));
+fn parse_next_inner(
+    stream: &[u8],
+    genus: &mut CounterTable,
+    strict: bool,
+) -> Result<(ParsedMessage, usize), CoreError> {
+    let mut offset = 0;
+    // Genus-version counters before the message switch the stream's genus.
+    while stream[offset..].starts_with(b"-_") {
+        let counter = read_counter(&stream[offset..])?;
+        let (major, _minor) = counter.genus_version().ok_or_else(|| {
+            CoreError::ParseError(format!(
+                "{:?} is not a genus-version counter this parser knows",
+                counter.code
+            ))
+        })?;
+        *genus = CounterTable::for_genus(major)?;
+        offset += counter.size;
     }
+    let rest = &stream[offset..];
+    let Some(&first) = rest.first() else {
+        return Err(CoreError::ParseError("empty stream".into()));
+    };
 
-    // Detect whether the stream starts with a message body (JSON/CBOR/MGPK)
-    // or a CESR-native text stream.
-    let first = stream[0];
+    // A message body is a JSON, CBOR or MessagePack map, or (in a 2.x
+    // stream) a CESR-native group.
     if first == b'{' || is_cbor_start(first) || is_msgpack_start(first) {
-        parse_next_sad(stream, strict)
+        let (msg, consumed) = parse_next_sad(rest, *genus, strict)?;
+        Ok((msg, offset + consumed))
+    } else if first == b'-' {
+        let counter = read_counter(rest)?;
+        let base = counter.code.trim_start_matches('-');
+        Err(match (*genus, base) {
+            // keripy CounterCodex_2_0: FixBodyGroup, MapBodyGroup.
+            (CounterTable::V2, "F" | "G") => CoreError::native_cesr_unsupported(),
+            (CounterTable::V2, "B" | "H") | (CounterTable::V1, "U" | "W") => {
+                CoreError::Unsupported(format!(
+                    "enclosed message group {:?} in a {genus:?} stream",
+                    counter.code
+                ))
+            }
+            _ => CoreError::ParseError(format!(
+                "a {genus:?} stream has counter {:?} where a message was expected",
+                counter.code
+            )),
+        })
     } else {
         Err(CoreError::ParseError(format!(
             "unrecognized stream start byte: 0x{first:02x}"
@@ -187,8 +244,12 @@ fn parse_next_inner(stream: &[u8], strict: bool) -> Result<(ParsedMessage, usize
 
 /// Parse all messages from a byte stream.
 ///
+/// The stream starts in CESR genus 1.x; a genus-version counter anywhere
+/// between messages switches it (P1, P2).
+///
 /// # Errors
-/// Returns `CoreError::ParseError` if any message cannot be parsed.
+/// Returns `CoreError::ParseError` if any message cannot be parsed. A frame
+/// that cannot be read fails the whole stream: nothing is skipped (P3).
 pub fn parse_all(stream: &[u8]) -> Result<Vec<ParsedMessage>, CoreError> {
     parse_all_inner(stream, true)
 }
@@ -205,6 +266,7 @@ pub fn parse_all_lenient(stream: &[u8]) -> Result<Vec<ParsedMessage>, CoreError>
 fn parse_all_inner(stream: &[u8], strict: bool) -> Result<Vec<ParsedMessage>, CoreError> {
     let mut messages = Vec::new();
     let mut offset = 0;
+    let mut genus = CounterTable::V1;
 
     while offset < stream.len() {
         // Skip any whitespace between messages
@@ -214,8 +276,15 @@ fn parse_all_inner(stream: &[u8], strict: bool) -> Result<Vec<ParsedMessage>, Co
         if offset >= stream.len() {
             break;
         }
+        // A genus-version counter at the very end announces nothing.
+        if stream[offset..].starts_with(b"-_") {
+            let counter = read_counter(&stream[offset..])?;
+            if offset + counter.size == stream.len() {
+                break;
+            }
+        }
 
-        let (msg, consumed) = parse_next_inner(&stream[offset..], strict)?;
+        let (msg, consumed) = parse_next_inner(&stream[offset..], &mut genus, strict)?;
         if consumed == 0 {
             return Err(CoreError::ParseError(
                 "parse_next consumed zero bytes".into(),
@@ -228,24 +297,35 @@ fn parse_all_inner(stream: &[u8], strict: bool) -> Result<Vec<ParsedMessage>, Co
     Ok(messages)
 }
 
-/// Parse a SAD-based message (JSON/CBOR/MGPK) followed by CESR attachments.
-fn parse_next_sad(stream: &[u8], strict: bool) -> Result<(ParsedMessage, usize), CoreError> {
+/// Parse a SAD-based message (JSON/CBOR/MGPK) followed by CESR attachments,
+/// read in the stream's genus.
+fn parse_next_sad(
+    stream: &[u8],
+    genus: CounterTable,
+    strict: bool,
+) -> Result<(ParsedMessage, usize), CoreError> {
     let serder = Serder::from_raw(stream)?;
     let msg_size = serder.size();
 
-    // The counter table is chosen by the protocol version in the message's own
-    // version string, never guessed: reading a 1.x stream against the 2.x
-    // table turns controller signatures into an uninterpreted group.
-    let table = serder
-        .version
-        .as_ref()
-        .map_or(CounterTable::default(), |v| {
-            CounterTable::from_major(v.major)
-        });
+    // Attachments follow the stream's genus, and the body carries its own
+    // version: keripy republishes v1 events in a 2.x stream with 2.x
+    // attachments (P2). The reverse — a version 2 message in a 1.x stream —
+    // has no attachment table that could be right for it, so it is refused.
+    if let Some(v) = serder.version.as_ref()
+        && v.major >= 2
+        && genus == CounterTable::V1
+    {
+        return Err(CoreError::ParseError(format!(
+            "a version {}.{} message in a CESR 1.x stream: a 2.x stream opens with \
+             the genus-version counter {}",
+            v.major,
+            v.minor,
+            CounterTable::V2.genus_counter()
+        )));
+    }
 
-    // Parse attachments after the message body
     let rest = &stream[msg_size..];
-    let (attachments, att_consumed) = parse_attachments(rest, table, strict)?;
+    let (attachments, att_consumed) = parse_attachments(rest, genus, strict)?;
 
     let total_consumed = msg_size + att_consumed;
     Ok((
@@ -259,7 +339,8 @@ fn parse_next_sad(stream: &[u8], strict: bool) -> Result<(ParsedMessage, usize),
 
 /// Parse CESR attachment groups from the stream following a message body.
 ///
-/// `table` decides what each counter code means; see [`CounterTable`].
+/// `table` decides what each counter code means and what its count counts;
+/// see [`CounterTable`].
 ///
 /// In strict mode a counter code this parser does not model is an error. In
 /// lenient mode it is recorded as [`Attachment::Unknown`] and parsing stops,
@@ -275,126 +356,36 @@ fn parse_attachments(
     let mut attachments = Vec::new();
     let mut offset = 0;
 
-    while offset < data.len() {
-        // Check if we're looking at a counter code (starts with '-')
-        if data[offset] != b'-' {
-            // Not an attachment group; stop parsing attachments
-            break;
-        }
-
-        // Try to parse a counter from the text.
-        // CESR is Base64-encoded, so all valid data must be ASCII.
-        // Reject non-ASCII to prevent panics from byte-indexing multi-byte UTF-8.
+    // A genus-version counter ends this message's attachments: it opens the
+    // next run of the stream.
+    while offset < data.len() && data[offset] == b'-' && !data[offset..].starts_with(b"-_") {
+        // CESR text is Base64, so all of it is ASCII. Checked up front so no
+        // later slice can land inside a multi-byte character.
         if !data[offset..].is_ascii() {
             return Err(CoreError::ParseError(
                 "attachment data contains non-ASCII bytes".into(),
             ));
         }
-        let rest = std::str::from_utf8(&data[offset..])
-            .map_err(|_| CoreError::ParseError("attachment data is not valid UTF-8".into()))?;
-
-        let counter = Counter::from_qb64(rest)
-            .map_err(|e| CoreError::ParseError(format!("failed to parse counter: {e}")))?;
-
-        let counter_size = counter.full_size();
-        offset += counter_size;
-
-        let code = counter.code().to_string();
-        let count = counter.count();
-
-        let Some(kind) = GroupKind::classify(&code, table) else {
-            if strict {
-                return Err(CoreError::ParseError(format!(
-                    "unrecognised attachment counter code {code:?} for {table:?}; \
-                     refusing to guess its length"
-                )));
+        let (group, consumed) = parse_group(&data[offset..], table, strict)?;
+        offset += consumed;
+        match group {
+            Group::One(a) => {
+                let stop = matches!(a, Attachment::Unknown { .. });
+                attachments.push(a);
+                if stop {
+                    offset = data.len();
+                    break;
+                }
             }
-            attachments.push(Attachment::Unknown {
-                code,
-                count,
-                raw: data[offset..].to_vec(),
-            });
-            offset = data.len();
-            break;
-        };
-
-        match kind {
-            GroupKind::AttachedMaterialQuadlets => {
-                // The count is in quadlets (4-character units) of nested
-                // attachment material, not a number of primitives. Recurse
-                // into exactly that span so a wrapper cannot swallow the
-                // groups it contains.
-                let byte_len = count.checked_mul(4).ok_or_else(|| {
-                    CoreError::ParseError(format!("quadlet count {count} overflows"))
-                })?;
-                let end = offset.checked_add(byte_len).ok_or_else(|| {
-                    CoreError::ParseError("attachment group extends past usize".into())
-                })?;
-                if end > data.len() {
-                    return Err(CoreError::ParseError(format!(
-                        "attachment group of {byte_len} bytes extends past the stream \
-                         ({} bytes available)",
-                        data.len() - offset
-                    )));
-                }
-                let (inner, consumed) = parse_attachments(&data[offset..end], table, strict)?;
-                if consumed != byte_len {
-                    return Err(CoreError::ParseError(format!(
-                        "attachment group declared {byte_len} bytes but its contents \
-                         accounted for {consumed}"
-                    )));
-                }
+            Group::Many(inner) => {
+                let stop = inner
+                    .iter()
+                    .any(|a| matches!(a, Attachment::Unknown { .. }));
                 attachments.extend(inner);
-                offset = end;
-            }
-            GroupKind::ControllerIdxSigs => {
-                let (sigers, consumed) = parse_indexed_sigs(&data[offset..], count)?;
-                attachments.push(Attachment::ControllerSigs(sigers));
-                offset += consumed;
-            }
-            GroupKind::WitnessIdxSigs => {
-                let (sigers, consumed) = parse_indexed_sigs(&data[offset..], count)?;
-                attachments.push(Attachment::WitnessSigs(sigers));
-                offset += consumed;
-            }
-            GroupKind::NonTransReceiptCouples => {
-                let (couples, consumed) = parse_receipt_couples(&data[offset..], count)?;
-                attachments.push(Attachment::ReceiptCouples(couples));
-                offset += consumed;
-            }
-            GroupKind::FirstSeenReplayCouples => {
-                let (couples, consumed) = parse_qb64_pairs(&data[offset..], count)?;
-                attachments.push(Attachment::FirstSeenReplayCouples(couples));
-                offset += consumed;
-            }
-            GroupKind::SealSourceCouples => {
-                let (couples, consumed) = parse_qb64_pairs(&data[offset..], count)?;
-                attachments.push(Attachment::SealSourceCouples(couples));
-                offset += consumed;
-            }
-            GroupKind::TransIdxSigGroups => {
-                let (groups, consumed) =
-                    parse_trans_idx_sig_groups(&data[offset..], count, table, strict)?;
-                attachments.push(Attachment::TransIdxSigGroups(groups));
-                offset += consumed;
-            }
-            // Modelled in the code table but not yet parsed. Treated exactly
-            // like an unrecognised code rather than skipped, because their
-            // internal shape is what determines their length.
-            GroupKind::TransReceiptQuadruples => {
-                if strict {
-                    return Err(CoreError::ParseError(format!(
-                        "attachment group {code:?} ({kind:?}) is not yet supported; \
-                         refusing to guess its length"
-                    )));
+                if stop {
+                    offset = data.len();
+                    break;
                 }
-                attachments.push(Attachment::Unknown {
-                    code,
-                    count,
-                    raw: data[offset..].to_vec(),
-                });
-                offset = data.len();
-                break;
             }
         }
     }
@@ -402,257 +393,342 @@ fn parse_attachments(
     Ok((attachments, offset))
 }
 
-/// Parse `count` transferable indexed signature groups.
-///
-/// Each group is a (prefix, sequence number, event SAID) triple followed by a
-/// nested controller-indexed-signature group.
-fn parse_trans_idx_sig_groups(
+/// One counted group: a single attachment, or the contents of a nested
+/// attachment group.
+enum Group {
+    One(Attachment),
+    Many(Vec<Attachment>),
+}
+
+/// Parse the counted group at the head of `data`, returning it and the bytes
+/// it occupies.
+fn parse_group(
     data: &[u8],
-    count: usize,
     table: CounterTable,
     strict: bool,
-) -> Result<(Vec<TransIdxSigGroup>, usize), CoreError> {
-    if count > MAX_ATTACHMENT_COUNT {
-        return Err(CoreError::ParseError(format!(
-            "transferable sig group count {count} exceeds maximum of {MAX_ATTACHMENT_COUNT}"
-        )));
-    }
-    if !data.is_ascii() {
-        return Err(CoreError::ParseError(
-            "transferable sig group data contains non-ASCII bytes".into(),
-        ));
-    }
-    let text = std::str::from_utf8(data).map_err(|_| {
-        CoreError::ParseError("transferable sig group data is not valid UTF-8".into())
-    })?;
+) -> Result<(Group, usize), CoreError> {
+    let counter = read_counter(data)?;
+    let mut offset = counter.size;
+    let code = counter.code.clone();
+    let count = counter.count;
 
-    let mut groups = Vec::with_capacity(count);
-    let mut offset = 0;
-
-    for i in 0..count {
-        let (prefix, n) = parse_matter_qb64(&text[offset..], i, "transferable sig group prefix")?;
-        offset += n;
-        let (sn, n) = parse_matter_qb64(&text[offset..], i, "transferable sig group sn")?;
-        offset += n;
-        let (said, n) = parse_matter_qb64(&text[offset..], i, "transferable sig group said")?;
-        offset += n;
-
-        // The signatures follow as their own counted group.
-        let (inner, consumed) = parse_attachments(&data[offset..], table, strict)?;
-        offset += consumed;
-
-        let mut sigs = Vec::new();
-        for att in inner {
-            match att {
-                Attachment::ControllerSigs(s) => sigs.extend(s),
-                other => {
-                    return Err(CoreError::ParseError(format!(
-                        "transferable sig group {i} contains {other:?} where indexed \
-                         signatures were expected"
-                    )));
-                }
-            }
-        }
-        if sigs.is_empty() {
+    let Some(kind) = GroupKind::classify(&code, table) else {
+        if strict {
             return Err(CoreError::ParseError(format!(
-                "transferable sig group {i} carries no signatures"
+                "unrecognised attachment counter code {code:?} for {table:?}; \
+                 refusing to guess its length"
             )));
         }
+        return Ok((
+            Group::One(Attachment::Unknown {
+                code,
+                count,
+                raw: data[offset..].to_vec(),
+            }),
+            data.len(),
+        ));
+    };
 
-        groups.push(TransIdxSigGroup {
+    let body = &data[offset..];
+    let group = match kind {
+        GroupKind::AttachedMaterialQuadlets => {
+            // The count is in quadlets of nested attachment material. Recurse
+            // into exactly that span so a wrapper cannot swallow the groups
+            // that follow it, nor stop short of its own.
+            let span = quadlet_span(body, count)?;
+            let (inner, consumed) = parse_attachments(&body[..span], table, strict)?;
+            if consumed != span {
+                return Err(CoreError::ParseError(format!(
+                    "attachment group declared {span} bytes but its contents \
+                     accounted for {consumed}"
+                )));
+            }
+            offset += span;
+            return Ok((Group::Many(inner), offset));
+        }
+        GroupKind::ControllerIdxSigs => {
+            let (sigs, n) = take(body, table, kind, count, parse_indexed_sig)?;
+            offset += n;
+            Attachment::ControllerSigs(sigs)
+        }
+        GroupKind::WitnessIdxSigs => {
+            let (sigs, n) = take(body, table, kind, count, parse_indexed_sig)?;
+            offset += n;
+            Attachment::WitnessSigs(sigs)
+        }
+        GroupKind::NonTransReceiptCouples => {
+            let (couples, n) = take(body, table, kind, count, parse_receipt_couple)?;
+            offset += n;
+            Attachment::ReceiptCouples(couples)
+        }
+        GroupKind::FirstSeenReplayCouples => {
+            let (couples, n) = take(body, table, kind, count, parse_qb64_pair)?;
+            offset += n;
+            Attachment::FirstSeenReplayCouples(couples)
+        }
+        GroupKind::SealSourceCouples => {
+            let (couples, n) = take(body, table, kind, count, parse_qb64_pair)?;
+            offset += n;
+            Attachment::SealSourceCouples(couples)
+        }
+        GroupKind::TransIdxSigGroups => {
+            let (groups, n) = take(body, table, kind, count, |d| {
+                parse_trans_idx_sig_group(d, table)
+            })?;
+            offset += n;
+            Attachment::TransIdxSigGroups(groups)
+        }
+        // Modelled in the code table but not parsed. Treated exactly like an
+        // unrecognised code rather than skipped, because its internal shape
+        // is what determines its length.
+        _ => {
+            if strict {
+                return Err(CoreError::ParseError(format!(
+                    "attachment group {code:?} ({kind:?}) is not yet supported; \
+                     refusing to guess its length"
+                )));
+            }
+            return Ok((
+                Group::One(Attachment::Unknown {
+                    code,
+                    count,
+                    raw: body.to_vec(),
+                }),
+                data.len(),
+            ));
+        }
+    };
+    Ok((Group::One(group), offset))
+}
+
+/// The byte length of `count` quadlets, checked against what is available.
+fn quadlet_span(data: &[u8], count: usize) -> Result<usize, CoreError> {
+    let span = count
+        .checked_mul(4)
+        .ok_or_else(|| CoreError::ParseError(format!("quadlet count {count} overflows")))?;
+    if span > data.len() {
+        return Err(CoreError::ParseError(format!(
+            "attachment group of {span} bytes extends past the stream ({} bytes available)",
+            data.len()
+        )));
+    }
+    Ok(span)
+}
+
+/// Read the items of a group with `item`: `count` of them where the table
+/// counts items, or exactly `count` quadlets' worth where it counts quadlets.
+fn take<T>(
+    data: &[u8],
+    table: CounterTable,
+    kind: GroupKind,
+    count: usize,
+    item: impl Fn(&[u8]) -> Result<(T, usize), CoreError>,
+) -> Result<(Vec<T>, usize), CoreError> {
+    let mut items = Vec::new();
+    let mut offset = 0;
+    if table.counts_quadlets(kind) {
+        let span = quadlet_span(data, count)?;
+        while offset < span {
+            if items.len() >= MAX_ATTACHMENT_COUNT {
+                return Err(CoreError::ParseError(format!(
+                    "{kind:?} holds more than {MAX_ATTACHMENT_COUNT} items"
+                )));
+            }
+            let (it, n) = item(&data[offset..span])?;
+            items.push(it);
+            offset += n;
+        }
+        if offset != span {
+            return Err(CoreError::ParseError(format!(
+                "{kind:?} declared {span} bytes but its items accounted for {offset}"
+            )));
+        }
+    } else {
+        if count > MAX_ATTACHMENT_COUNT {
+            return Err(CoreError::ParseError(format!(
+                "{kind:?} count {count} exceeds maximum of {MAX_ATTACHMENT_COUNT}"
+            )));
+        }
+        if count * MIN_PRIMITIVE_SIZE > data.len() {
+            return Err(CoreError::ParseError(format!(
+                "{kind:?} count {count} requires at least {} bytes, but only {} available",
+                count * MIN_PRIMITIVE_SIZE,
+                data.len()
+            )));
+        }
+        for _ in 0..count {
+            let (it, n) = item(&data[offset..])?;
+            items.push(it);
+            offset += n;
+        }
+    }
+    Ok((items, offset))
+}
+
+/// Parse one transferable indexed signature group: a (prefix, sequence
+/// number, event SAID) triple followed by exactly one nested
+/// controller-indexed-signature group.
+fn parse_trans_idx_sig_group(
+    data: &[u8],
+    table: CounterTable,
+) -> Result<(TransIdxSigGroup, usize), CoreError> {
+    let text = ascii(data, "transferable sig group")?;
+    let mut offset = 0;
+    let (prefix, n) = parse_matter_qb64(&text[offset..], 0, "transferable sig group prefix")?;
+    offset += n;
+    let (sn, n) = parse_matter_qb64(&text[offset..], 0, "transferable sig group sn")?;
+    offset += n;
+    let (said, n) = parse_matter_qb64(&text[offset..], 0, "transferable sig group said")?;
+    offset += n;
+
+    let counter = read_counter(&data[offset..])?;
+    if GroupKind::classify(&counter.code, table) != Some(GroupKind::ControllerIdxSigs) {
+        return Err(CoreError::ParseError(format!(
+            "transferable sig group has {:?} where indexed signatures were expected",
+            counter.code
+        )));
+    }
+    offset += counter.size;
+    let (sigs, n) = take(
+        &data[offset..],
+        table,
+        GroupKind::ControllerIdxSigs,
+        counter.count,
+        parse_indexed_sig,
+    )?;
+    offset += n;
+    if sigs.is_empty() {
+        return Err(CoreError::ParseError(
+            "transferable sig group carries no signatures".into(),
+        ));
+    }
+    Ok((
+        TransIdxSigGroup {
             prefix,
             sn,
             said,
             sigs,
-        });
-    }
-
-    Ok((groups, offset))
+        },
+        offset,
+    ))
 }
 
-/// Parse `count` pairs of fixed-size qb64 primitives, returning them as
-/// strings. Used for the couple-shaped groups (first seen replay, seal
-/// source) whose members are plain Matter primitives.
+fn ascii<'a>(data: &'a [u8], what: &str) -> Result<&'a str, CoreError> {
+    // CESR is Base64-encoded, so all valid data must be ASCII. Reject
+    // non-ASCII to prevent panics from byte-indexing multi-byte UTF-8.
+    if !data.is_ascii() {
+        return Err(CoreError::ParseError(format!(
+            "{what} data contains non-ASCII bytes"
+        )));
+    }
+    std::str::from_utf8(data)
+        .map_err(|_| CoreError::ParseError(format!("{what} data is not valid UTF-8")))
+}
+
+/// Parse a pair of fixed-size qb64 primitives, as strings: the couple-shaped
+/// groups (first seen replay, seal source) whose members are plain Matter
+/// primitives.
+fn parse_qb64_pair(data: &[u8]) -> Result<((String, String), usize), CoreError> {
+    let text = ascii(data, "couple")?;
+    let (first, a) = parse_matter_qb64(text, 0, "couple first member")?;
+    let (second, b) = parse_matter_qb64(&text[a..], 0, "couple second member")?;
+    Ok(((first, second), a + b))
+}
+
+/// Parse `count` pairs of fixed-size qb64 primitives (1.x item counts).
+#[cfg(test)]
 fn parse_qb64_pairs(
     data: &[u8],
     count: usize,
 ) -> Result<(Vec<(String, String)>, usize), CoreError> {
-    if count > MAX_ATTACHMENT_COUNT {
-        return Err(CoreError::ParseError(format!(
-            "couple count {count} exceeds maximum of {MAX_ATTACHMENT_COUNT}"
-        )));
-    }
-    if count * MIN_PRIMITIVE_SIZE * 2 > data.len() {
-        return Err(CoreError::ParseError(format!(
-            "couple count {count} requires at least {} bytes, but only {} available",
-            count * MIN_PRIMITIVE_SIZE * 2,
-            data.len()
-        )));
-    }
-    if !data.is_ascii() {
-        return Err(CoreError::ParseError(
-            "couple data contains non-ASCII bytes".into(),
-        ));
-    }
-    let text = std::str::from_utf8(data)
-        .map_err(|_| CoreError::ParseError("couple data is not valid UTF-8".into()))?;
-
-    let mut couples = Vec::with_capacity(count);
-    let mut offset = 0;
-
-    for i in 0..count {
-        let (first, first_size) = parse_matter_qb64(&text[offset..], i, "couple first member")?;
-        offset += first_size;
-        let (second, second_size) = parse_matter_qb64(&text[offset..], i, "couple second member")?;
-        offset += second_size;
-        couples.push((first, second));
-    }
-
-    Ok((couples, offset))
+    take(
+        data,
+        CounterTable::V1,
+        GroupKind::SealSourceCouples,
+        count,
+        parse_qb64_pair,
+    )
 }
 
-/// Parse `count` indexed signatures from the data.
+/// Parse one indexed signature.
+fn parse_indexed_sig(data: &[u8]) -> Result<(Siger, usize), CoreError> {
+    let text = ascii(data, "indexed sig")?;
+    let first_char = text
+        .chars()
+        .next()
+        .ok_or_else(|| CoreError::ParseError("empty data for indexed sig".into()))?;
+    let hs = hardage(first_char).ok_or_else(|| {
+        CoreError::ParseError(format!(
+            "unknown hardage for char '{first_char}' in indexed sig"
+        ))
+    })?;
+    if hs > text.len() {
+        return Err(CoreError::ParseError("truncated indexer code".into()));
+    }
+    let code = &text[..hs];
+    let sizage = indexer_sizage(code)
+        .ok_or_else(|| CoreError::ParseError(format!("unknown indexer code: {code}")))?;
+    if sizage.fs > text.len() {
+        return Err(CoreError::ParseError(format!(
+            "truncated indexed sig: need {}, have {}",
+            sizage.fs,
+            text.len()
+        )));
+    }
+    let indexer = Indexer::from_qb64(&text[..sizage.fs])
+        .map_err(|e| CoreError::ParseError(format!("failed to parse indexer: {e}")))?;
+    let siger = Siger::new(
+        indexer.code(),
+        indexer.index(),
+        indexer.ondex(),
+        indexer.raw().to_vec(),
+    )
+    .map_err(CoreError::Crypto)?;
+    Ok((siger, sizage.fs))
+}
+
+/// Parse `count` indexed signatures (1.x item counts).
+#[cfg(test)]
 fn parse_indexed_sigs(data: &[u8], count: usize) -> Result<(Vec<Siger>, usize), CoreError> {
-    if count > MAX_ATTACHMENT_COUNT {
-        return Err(CoreError::ParseError(format!(
-            "indexed sig count {count} exceeds maximum of {MAX_ATTACHMENT_COUNT}"
-        )));
-    }
-    if count * MIN_PRIMITIVE_SIZE > data.len() {
-        return Err(CoreError::ParseError(format!(
-            "indexed sig count {count} requires at least {} bytes, but only {} available",
-            count * MIN_PRIMITIVE_SIZE,
-            data.len()
-        )));
-    }
-
-    // CESR is Base64-encoded, so all valid data must be ASCII.
-    // Reject non-ASCII to prevent panics from byte-indexing multi-byte UTF-8.
-    if !data.is_ascii() {
-        return Err(CoreError::ParseError(
-            "indexed sig data contains non-ASCII bytes".into(),
-        ));
-    }
-    let text = std::str::from_utf8(data)
-        .map_err(|_| CoreError::ParseError("indexed sig data is not valid UTF-8".into()))?;
-
-    let mut sigers = Vec::with_capacity(count);
-    let mut offset = 0;
-
-    for i in 0..count {
-        if offset >= text.len() {
-            return Err(CoreError::ParseError(format!(
-                "unexpected end of data while parsing indexed sig {i}/{count}"
-            )));
-        }
-
-        // Determine the full size of this indexed signature
-        let first_char = text[offset..]
-            .chars()
-            .next()
-            .ok_or_else(|| CoreError::ParseError(format!("empty data for indexed sig {i}")))?;
-        let hs = hardage(first_char).ok_or_else(|| {
-            CoreError::ParseError(format!(
-                "unknown hardage for char '{first_char}' in indexed sig"
-            ))
-        })?;
-
-        if offset + hs > text.len() {
-            return Err(CoreError::ParseError("truncated indexer code".into()));
-        }
-        let code = &text[offset..offset + hs];
-        let sizage = indexer_sizage(code)
-            .ok_or_else(|| CoreError::ParseError(format!("unknown indexer code: {code}")))?;
-
-        if offset + sizage.fs > text.len() {
-            return Err(CoreError::ParseError(format!(
-                "truncated indexed sig: need {}, have {}",
-                sizage.fs,
-                text.len() - offset
-            )));
-        }
-
-        let qb64 = &text[offset..offset + sizage.fs];
-        let indexer = Indexer::from_qb64(qb64)
-            .map_err(|e| CoreError::ParseError(format!("failed to parse indexer: {e}")))?;
-
-        let siger = Siger::new(
-            indexer.code(),
-            indexer.index(),
-            indexer.ondex(),
-            indexer.raw().to_vec(),
-        )
-        .map_err(CoreError::Crypto)?;
-
-        sigers.push(siger);
-        offset += sizage.fs;
-    }
-
-    Ok((sigers, offset))
+    take(
+        data,
+        CounterTable::V1,
+        GroupKind::ControllerIdxSigs,
+        count,
+        parse_indexed_sig,
+    )
 }
 
-/// Parse `count` receipt couples (prefix + non-indexed signature).
-/// Each couple is a Matter primitive (prefix) + Matter primitive (signature).
-fn parse_receipt_couples(
-    data: &[u8],
-    count: usize,
-) -> Result<(Vec<ReceiptCouple>, usize), CoreError> {
-    if count > MAX_ATTACHMENT_COUNT {
-        return Err(CoreError::ParseError(format!(
-            "receipt couple count {count} exceeds maximum of {MAX_ATTACHMENT_COUNT}"
-        )));
-    }
-    // Each couple contains two primitives.
-    if count * MIN_PRIMITIVE_SIZE * 2 > data.len() {
-        return Err(CoreError::ParseError(format!(
-            "receipt couple count {count} requires at least {} bytes, but only {} available",
-            count * MIN_PRIMITIVE_SIZE * 2,
-            data.len()
-        )));
-    }
+/// Parse one receipt couple (prefix + non-indexed signature).
+fn parse_receipt_couple(data: &[u8]) -> Result<(ReceiptCouple, usize), CoreError> {
+    let text = ascii(data, "receipt couple")?;
+    let (prefix_qb64, a) = parse_matter_qb64(text, 0, "prefix")?;
+    let (sig_qb64, b) = parse_matter_qb64(&text[a..], 0, "signature")?;
+    let sig_matter = affinidi_cesr::Matter::from_qb64(&sig_qb64)
+        .map_err(|e| CoreError::ParseError(format!("failed to parse sig matter: {e}")))?;
+    Ok(((prefix_qb64, sig_matter.raw().to_vec()), a + b))
+}
 
-    // CESR is Base64-encoded, so all valid data must be ASCII.
-    // Reject non-ASCII to prevent panics from byte-indexing multi-byte UTF-8.
-    if !data.is_ascii() {
-        return Err(CoreError::ParseError(
-            "receipt couple data contains non-ASCII bytes".into(),
-        ));
-    }
-    let text = std::str::from_utf8(data)
-        .map_err(|_| CoreError::ParseError("receipt couple data is not valid UTF-8".into()))?;
-
-    let mut couples = Vec::with_capacity(count);
-    let mut offset = 0;
-
-    for i in 0..count {
-        // Parse prefix (Matter primitive)
-        let (prefix_qb64, prefix_size) = parse_matter_qb64(&text[offset..], i, "prefix")?;
-        offset += prefix_size;
-
-        // Parse signature (Matter primitive)
-        let (sig_qb64, sig_size) = parse_matter_qb64(&text[offset..], i, "signature")?;
-        offset += sig_size;
-
-        // Decode the signature raw bytes from the Matter
-        let sig_matter = affinidi_cesr::Matter::from_qb64(&sig_qb64)
-            .map_err(|e| CoreError::ParseError(format!("failed to parse sig matter: {e}")))?;
-
-        couples.push((prefix_qb64, sig_matter.raw().to_vec()));
-    }
-
-    Ok((couples, offset))
+/// Full sizes of fixed-size Matter codes `affinidi-cesr` 0.1.3 does not know
+/// but KERI attachments carry: keripy's Number codes (`coring.py`, `NumDex`),
+/// which a 2.x first-seen replay couple uses for its ordinal (`MAAA`).
+fn extra_matter_size(code: &str) -> Option<usize> {
+    Some(match code {
+        "M" => 4,  // Short
+        "0H" => 8, // Long
+        "R" => 8,  // Tall
+        "N" => 12, // Big
+        "S" => 16, // Large
+        "T" => 20, // Great
+        "U" => 24, // Vast
+        _ => return None,
+    })
 }
 
 /// Parse a single Matter primitive qb64 string from text data.
 /// Returns the qb64 string and the number of characters consumed.
 fn parse_matter_qb64(text: &str, index: usize, name: &str) -> Result<(String, usize), CoreError> {
     use affinidi_cesr::tables::matter_sizage;
-
-    if text.is_empty() {
-        return Err(CoreError::ParseError(format!(
-            "empty data for {name} at couple {index}"
-        )));
-    }
 
     let first_char = text
         .chars()
@@ -670,15 +746,16 @@ fn parse_matter_qb64(text: &str, index: usize, name: &str) -> Result<(String, us
     }
 
     let code = &text[..hs];
-    let sizage = matter_sizage(code)
-        .ok_or_else(|| CoreError::ParseError(format!("unknown matter code: {code} for {name}")))?;
-
-    let fs = if sizage.fs > 0 {
-        sizage.fs
-    } else {
-        return Err(CoreError::ParseError(format!(
-            "variable-length {name} not supported in receipt couples"
-        )));
+    let fs = match matter_sizage(code) {
+        Some(sizage) if sizage.fs > 0 => sizage.fs,
+        Some(_) => {
+            return Err(CoreError::ParseError(format!(
+                "variable-length {name} not supported in attachment couples"
+            )));
+        }
+        None => extra_matter_size(code).ok_or_else(|| {
+            CoreError::ParseError(format!("unknown matter code: {code} for {name}"))
+        })?,
     };
 
     if text.len() < fs {

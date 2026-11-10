@@ -480,7 +480,7 @@ pub fn incept(inception: &Inception) -> Result<PendingEvent, KeriError> {
         "k": inception.keys,
         "nt": threshold_sad(&inception.next_threshold),
         "n": next,
-        "bt": inception.backer_threshold.to_string(),
+        "bt": format!("{:x}", inception.backer_threshold),
         "b": inception.backers,
         "c": inception.config_traits,
         "a": []
@@ -569,10 +569,11 @@ impl ControllerState {
             "k": keys,
             "nt": threshold_sad(&rotation.next_threshold),
             "n": next,
-            "bt": backer_threshold.to_string(),
+            "bt": format!("{:x}", backer_threshold),
             "br": rotation.backers_remove,
             "ba": rotation.backers_add,
-            "c": [],
+            // A version 1 `rot` has no `c` field; keripy refuses one that
+            // carries it ("Invalid top level field list").
             "a": []
         });
         let (said, raw) = saidify(sad)?;

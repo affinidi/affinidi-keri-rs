@@ -88,7 +88,8 @@ impl Threshold {
     ///
     /// A simple threshold is a JSON string like `"1"` or `"2"`.
     /// A weighted threshold is a nested JSON array of fractional strings,
-    /// e.g. `[["1/2", "1/2", "1/2"]]`.
+    /// e.g. `[["1/2", "1/2", "1/2"]]`, or, for a single clause, a flat one,
+    /// `["1/2", "1/2", "1/2"]`.
     ///
     /// `"0"` parses. It is how an event commits to no next keys (`nt: "0"`
     /// with an empty `n`), which abandons the identifier: no event may
@@ -99,8 +100,10 @@ impl Threshold {
     pub fn from_json_value(value: &serde_json::Value) -> Result<Self, CoreError> {
         match value {
             serde_json::Value::String(s) => {
-                let n: usize = s
-                    .parse()
+                // A simple threshold is a hex string: keripy reads it with
+                // `int(sith, 16)` and writes it with `:x`, so ten keys at
+                // threshold ten is `"a"`, not `"10"`.
+                let n = usize::from_str_radix(s, 16)
                     .map_err(|_| CoreError::Validation(format!("invalid threshold string: {s}")))?;
                 Ok(Threshold::Simple(n))
             }
@@ -113,12 +116,26 @@ impl Threshold {
                 })?;
                 Ok(Threshold::Simple(n))
             }
-            serde_json::Value::Array(clauses) => {
-                if clauses.is_empty() {
+            serde_json::Value::Array(items) => {
+                if items.is_empty() {
                     return Err(CoreError::Validation(
                         "weighted threshold must have at least one clause".into(),
                     ));
                 }
+                // A single clause may be written flat, `["1/2", "1"]`, and
+                // that is how keripy writes one (its `Tholder` simplifies
+                // `[["1/2","1"]]` when it serializes): read it as the one
+                // clause it is. Weights and clauses cannot be mixed.
+                let flat = [serde_json::Value::Array(items.clone())];
+                let clauses: &[serde_json::Value] = if items.iter().all(|i| i.is_string()) {
+                    &flat
+                } else if items.iter().all(|i| i.is_array()) {
+                    items
+                } else {
+                    return Err(CoreError::Validation(
+                        "weighted threshold mixes weights and clauses".into(),
+                    ));
+                };
                 let mut weighted = Vec::new();
                 for clause in clauses {
                     let arr = clause.as_array().ok_or_else(|| {
@@ -191,7 +208,7 @@ impl Threshold {
     /// Convert this threshold to its JSON representation.
     pub fn to_json_value(&self) -> serde_json::Value {
         match self {
-            Threshold::Simple(n) => serde_json::Value::String(n.to_string()),
+            Threshold::Simple(n) => serde_json::Value::String(format!("{n:x}")),
             Threshold::Weighted(clauses) => {
                 let arr: Vec<serde_json::Value> = clauses
                     .iter()
@@ -274,7 +291,7 @@ pub struct ThresholdValue(pub Threshold);
 impl Serialize for ThresholdValue {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match &self.0 {
-            Threshold::Simple(n) => serializer.serialize_str(&n.to_string()),
+            Threshold::Simple(n) => serializer.serialize_str(&format!("{n:x}")),
             Threshold::Weighted(clauses) => {
                 use serde::ser::SerializeSeq;
                 let mut seq = serializer.serialize_seq(Some(clauses.len()))?;
@@ -312,6 +329,14 @@ impl From<usize> for ThresholdValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_single_clause_may_be_written_flat_as_keripy_writes_it() {
+        let flat = Threshold::from_json_value(&serde_json::json!(["1/2", "1"])).unwrap();
+        let nested = Threshold::from_json_value(&serde_json::json!([["1/2", "1"]])).unwrap();
+        assert_eq!(flat, nested);
+        assert!(Threshold::from_json_value(&serde_json::json!(["1/2", ["1"]])).is_err());
+    }
 
     #[test]
     fn test_simple_threshold_parse() {
@@ -483,5 +508,20 @@ mod tests {
         let t = Threshold::Weighted(vec![]);
         assert!(!t.is_satisfied(&[], 0));
         assert!(!t.is_satisfied(&[0], 1));
+    }
+
+    #[test]
+    fn a_simple_threshold_is_hex_as_keripy_writes_it() {
+        let t = Threshold::from_json_value(&serde_json::json!("a")).unwrap();
+        assert_eq!(t, Threshold::Simple(10));
+        assert_eq!(
+            Threshold::Simple(10).to_json_value(),
+            serde_json::json!("a")
+        );
+        assert_eq!(Threshold::Simple(2).to_json_value(), serde_json::json!("2"));
+        assert_eq!(
+            Threshold::from_json_value(&serde_json::json!("10")).unwrap(),
+            Threshold::Simple(16)
+        );
     }
 }

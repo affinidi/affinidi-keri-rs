@@ -54,9 +54,38 @@ pub struct KeyState {
     /// delegator the identifier was incepted under — a `drt` naming a
     /// different delegator is an attempt to move control, not a rotation.
     pub delegator: Option<String>,
+    /// The KERI protocol major version of the latest event.
+    ///
+    /// A KEL may move up a version but never down (did:webs on KERI v2, P2),
+    /// so every later event must name this version or a higher one.
+    pub protocol_major: u8,
+}
+
+/// The protocol major version an event's version string names.
+fn event_major(version: &str) -> Result<u8, CoreError> {
+    Ok(crate::version::Version::parse_str(version)?.major)
 }
 
 impl KeyState {
+    /// Refuse an event that names a lower protocol version than the KEL has
+    /// reached, returning the event's version otherwise.
+    ///
+    /// keripy accepts a version decrease (fixture `downgrade-v2-to-v1`); this
+    /// is stricter on purpose: nothing needs to go back to v1, and refusing it
+    /// costs one comparison (P2, kswg-did-method-webs-specification#216).
+    fn check_version(&self, version: &str) -> Result<u8, CoreError> {
+        let major = event_major(version)?;
+        if major < self.protocol_major {
+            return Err(CoreError::Validation(format!(
+                "event for {} at sn {} names KERI {major}.x, but its KEL has reached                  {}.x: a KEL never moves to a lower protocol version",
+                self.prefix,
+                self.sn + 1,
+                self.protocol_major
+            )));
+        }
+        Ok(major)
+    }
+
     /// Create a new default/empty key state for a given prefix.
     pub fn new(prefix: &str) -> Self {
         Self {
@@ -73,6 +102,7 @@ impl KeyState {
             last_event_digest: String::new(),
             delegated: false,
             delegator: None,
+            protocol_major: 1,
         }
     }
 
@@ -138,6 +168,7 @@ impl KeyState {
             last_event_digest: event.said.clone(),
             delegated: false,
             delegator: None,
+            protocol_major: event_major(&event.version)?,
         })
     }
 
@@ -192,6 +223,7 @@ impl KeyState {
             last_event_digest: event.said.clone(),
             delegated: true,
             delegator: Some(event.delegator.clone()),
+            protocol_major: event_major(&event.version)?,
         })
     }
 
@@ -204,6 +236,7 @@ impl KeyState {
     /// Returns `CoreError` if the rotation event is invalid relative to current state.
     pub fn apply_rotation(&self, event: &RotationEvent) -> Result<Self, CoreError> {
         self.reject_if_abandoned()?;
+        let protocol_major = self.check_version(&event.version)?;
         let sn = parse_sn(&event.sn)?;
         if sn != self.sn + 1 {
             return Err(CoreError::OutOfOrder {
@@ -262,10 +295,11 @@ impl KeyState {
             next_threshold,
             backer_threshold,
             backers: new_backers,
-            config: event.config.clone(),
+            config: rotated_config(&self.config, protocol_major, &event.config),
             last_event_digest: event.said.clone(),
             delegated: self.delegated,
             delegator: self.delegator.clone(),
+            protocol_major,
         })
     }
 
@@ -335,6 +369,7 @@ impl KeyState {
     /// Returns `CoreError` if the interaction event is invalid relative to current state.
     pub fn apply_interaction(&self, event: &InteractionEvent) -> Result<Self, CoreError> {
         self.reject_if_abandoned()?;
+        let protocol_major = self.check_version(&event.version)?;
         let sn = parse_sn(&event.sn)?;
         if sn != self.sn + 1 {
             return Err(CoreError::OutOfOrder {
@@ -360,6 +395,7 @@ impl KeyState {
         let mut new_state = self.clone();
         new_state.sn = sn;
         new_state.last_event_digest = event.said.clone();
+        new_state.protocol_major = protocol_major;
         Ok(new_state)
     }
 }
@@ -433,6 +469,30 @@ fn verify_next_key_commitment(keys: &[String], next_keys: &[String]) -> Result<(
     Ok(())
 }
 
+/// The configuration traits after a rotation.
+///
+/// A version 1 rotation has no `c` field, so it leaves the traits as they
+/// were; clearing them, as treating the absent field as empty would, would
+/// silently lift an inception's restrictions. A version 2 rotation's `c`
+/// adds to them and cannot remove any: the traits KERI defines (`EO`, `DND`,
+/// …) restrict the identifier, and a rotation that could drop one would undo
+/// a restriction its inception made.
+///
+/// keripy at b70986f reads a v2 rotation's `c` but applies traits only at
+/// inception; this records the added traits as well. Neither crate enforces
+/// `EO` or `DND` yet.
+fn rotated_config(prior: &[String], protocol_major: u8, added: &[String]) -> Vec<String> {
+    let mut config = prior.to_vec();
+    if protocol_major >= 2 {
+        for trait_code in added {
+            if !config.contains(trait_code) {
+                config.push(trait_code.clone());
+            }
+        }
+    }
+    config
+}
+
 /// Parse a sequence number from its hex string representation.
 fn parse_sn(sn_str: &str) -> Result<u64, CoreError> {
     u64::from_str_radix(sn_str, 16)
@@ -441,8 +501,8 @@ fn parse_sn(sn_str: &str) -> Result<u64, CoreError> {
 
 /// Parse a backer threshold from its string representation.
 fn parse_backer_threshold(bt_str: &str) -> Result<usize, CoreError> {
-    bt_str
-        .parse::<usize>()
+    // Hex, like every KERI number in a field: keripy reads `bt` as a Number.
+    usize::from_str_radix(bt_str, 16)
         .map_err(|_| CoreError::Validation(format!("invalid backer threshold: {bt_str}")))
 }
 
