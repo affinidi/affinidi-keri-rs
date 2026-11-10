@@ -1,21 +1,41 @@
 //! KERI protocol version handling.
 //!
-//! KERI version strings follow the format `PPPPvvSSSSnnnnnnn_` where:
-//! - `PPPP` is the 4-character protocol identifier (e.g., "KERI", "ACDC")
-//! - `vv` is major.minor version as hex digits (e.g., "10" = v1.0)
-//! - `SSSS` is the 4-character serialization kind ("JSON", "CBOR", "MGPK")
-//! - `nnnnnn` is a 6-digit hex-encoded message size
-//! - `_` is the terminator
+//! Two version string forms exist, and a message carries whichever its
+//! protocol version uses (keripy `kering.py`, `VEREX1` / `VEREX2`):
 //!
-//! Total length: 4 + 2 + 4 + 6 + 1 = 17 characters.
+//! **Version 1**, 17 characters, `PPPPvvKKKKssssss_`:
+//! - `PPPP` protocol (`KERI`, `ACDC`)
+//! - `vv` major and minor, one hex digit each
+//! - `KKKK` serialization kind (`JSON`, `CBOR`, `MGPK`)
+//! - `ssssss` message size, six hex digits
+//! - `_` terminator
+//!
+//! **Version 2**, 19 characters, `PPPPMmmGggKKKKssss.`:
+//! - `PPPP` protocol
+//! - `Mmm` protocol major (one Base64 digit) and minor (two Base64 digits)
+//! - `Ggg` CESR genus major and minor, the same way
+//! - `KKKK` serialization kind, which may also be `CESR`
+//! - `ssss` message size, four Base64 digits
+//! - `.` terminator
+//!
+//! A v1 string must name major version 1 or lower and must not be `CESR`; a v2
+//! string must name protocol and genus major version 2. keripy enforces the
+//! same (`rematch`).
 
 use crate::error::CoreError;
 
-/// Full size of a KERI version string in bytes.
+/// Full size of a version 1 version string in bytes.
 pub const KERI_VER_FULLSIZE: usize = 17;
+
+/// Full size of a version 2 version string in bytes.
+pub const KERI_VER2_FULLSIZE: usize = 19;
+
+/// The URL-safe Base64 alphabet CESR uses for its digits.
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /// Serialization format for KERI messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SerializationKind {
     /// JSON serialization.
     Json,
@@ -23,6 +43,10 @@ pub enum SerializationKind {
     Cbor,
     /// MessagePack serialization.
     MsgPack,
+    /// Native CESR serialization (version 2 only). Recognised in version
+    /// strings so it can be refused by name; this crate does not yet read
+    /// native CESR message bodies.
+    Cesr,
 }
 
 impl SerializationKind {
@@ -32,6 +56,7 @@ impl SerializationKind {
             Self::Json => "JSON",
             Self::Cbor => "CBOR",
             Self::MsgPack => "MGPK",
+            Self::Cesr => "CESR",
         }
     }
 
@@ -41,6 +66,7 @@ impl SerializationKind {
             "JSON" => Ok(Self::Json),
             "CBOR" => Ok(Self::Cbor),
             "MGPK" => Ok(Self::MsgPack),
+            "CESR" => Ok(Self::Cesr),
             _ => Err(CoreError::InvalidVersion(format!(
                 "unknown serialization kind: {tag}"
             ))),
@@ -50,6 +76,7 @@ impl SerializationKind {
 
 /// A parsed KERI version string.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Version {
     /// Protocol identifier (e.g., "KERI").
     pub protocol: String,
@@ -61,10 +88,17 @@ pub struct Version {
     pub kind: SerializationKind,
     /// Message size in bytes.
     pub size: usize,
+    /// The CESR genus version a version 2 string names, as (major, minor).
+    /// `None` for a version 1 string, which names none.
+    pub genus: Option<(u8, u8)>,
 }
 
 impl Version {
     /// Create a new Version.
+    ///
+    /// A major version of 2 or above gets the genus version 2.0, which is what
+    /// a version 2 string must name; use [`with_genus`](Self::with_genus) to
+    /// name another.
     pub fn new(protocol: &str, major: u8, minor: u8, kind: SerializationKind, size: usize) -> Self {
         Self {
             protocol: protocol.to_string(),
@@ -72,6 +106,7 @@ impl Version {
             minor,
             kind,
             size,
+            genus: (major >= 2).then_some((2, 0)),
         }
     }
 
@@ -80,32 +115,83 @@ impl Version {
         Self::new("KERI", 1, 0, kind, size)
     }
 
-    /// Parse a version string from raw bytes.
-    ///
-    /// Expects at least 17 bytes in the format `PPPPvvSSSSnnnnnnn_`.
+    /// Shorthand for KERI v2.0, genus 2.0, with a given serialization kind
+    /// and size.
+    pub fn default_v2(kind: SerializationKind, size: usize) -> Self {
+        Self::new("KERI", 2, 0, kind, size)
+    }
+
+    /// The same version naming a different CESR genus version.
+    pub fn with_genus(mut self, major: u8, minor: u8) -> Self {
+        self.genus = Some((major, minor));
+        self
+    }
+
+    /// The length of this version's version string: 17 for version 1, 19
+    /// for version 2.
+    pub fn full_size(&self) -> usize {
+        if self.major >= 2 {
+            KERI_VER2_FULLSIZE
+        } else {
+            KERI_VER_FULLSIZE
+        }
+    }
+
+    /// Parse a version string from the start of raw bytes, in either form.
     ///
     /// # Errors
     /// Returns `CoreError::InvalidVersion` if the data cannot be parsed.
     pub fn parse(data: &[u8]) -> Result<Self, CoreError> {
-        if data.len() < KERI_VER_FULLSIZE {
-            return Err(CoreError::InvalidVersion(format!(
-                "version string too short: {} bytes (need {})",
-                data.len(),
-                KERI_VER_FULLSIZE,
-            )));
+        // The two forms are told apart by their terminators: `_` at 16 for
+        // version 1, `.` at 18 for version 2. Exactly one can hold, because a
+        // version 1 string has a hex digit where a version 2 string has its
+        // terminator's predecessor, and vice versa.
+        let v1 = data.len() >= KERI_VER_FULLSIZE && data[KERI_VER_FULLSIZE - 1] == b'_';
+        let v2 = data.len() >= KERI_VER2_FULLSIZE && data[KERI_VER2_FULLSIZE - 1] == b'.';
+        let len = match (v1, v2) {
+            (true, false) => KERI_VER_FULLSIZE,
+            (false, true) => KERI_VER2_FULLSIZE,
+            (true, true) => {
+                return Err(CoreError::InvalidVersion(
+                    "version string has both a version 1 and a version 2 terminator".into(),
+                ));
+            }
+            (false, false) => {
+                return Err(CoreError::InvalidVersion(format!(
+                    "no version string: need a `_` at byte {} or a `.` at byte {} \
+                     ({} bytes available)",
+                    KERI_VER_FULLSIZE - 1,
+                    KERI_VER2_FULLSIZE - 1,
+                    data.len()
+                )));
+            }
+        };
+        if !data[..len].is_ascii() {
+            return Err(CoreError::InvalidVersion(
+                "version string contains non-ASCII bytes".into(),
+            ));
         }
-
-        let vs = std::str::from_utf8(&data[..KERI_VER_FULLSIZE])
+        let vs = std::str::from_utf8(&data[..len])
             .map_err(|_| CoreError::InvalidVersion("version string is not valid UTF-8".into()))?;
-
         Self::parse_str(vs)
     }
 
-    /// Parse a version string from a `&str`.
+    /// Parse a version string from a `&str`, in either form.
     ///
     /// # Errors
     /// Returns `CoreError::InvalidVersion` if the string cannot be parsed.
     pub fn parse_str(vs: &str) -> Result<Self, CoreError> {
+        let bytes = vs.as_bytes();
+        if bytes.len() >= KERI_VER2_FULLSIZE
+            && bytes[KERI_VER2_FULLSIZE - 1] == b'.'
+            && bytes[..KERI_VER2_FULLSIZE].is_ascii()
+        {
+            return Self::parse_v2(&vs[..KERI_VER2_FULLSIZE]);
+        }
+        Self::parse_v1(vs)
+    }
+
+    fn parse_v1(vs: &str) -> Result<Self, CoreError> {
         if vs.len() < KERI_VER_FULLSIZE {
             return Err(CoreError::InvalidVersion(format!(
                 "version string too short: {} chars (need {})",
@@ -122,8 +208,7 @@ impl Version {
             ));
         }
 
-        // Protocol: chars 0..4
-        let protocol = &vs[0..4];
+        let protocol = parse_protocol(&vs[0..4])?;
 
         // Version: chars 4..6 (major hex digit + minor hex digit)
         let major_ch = vs.as_bytes()[4];
@@ -134,10 +219,19 @@ impl Version {
         let minor = hex_digit(minor_ch).ok_or_else(|| {
             CoreError::InvalidVersion(format!("invalid minor version digit: {}", minor_ch as char))
         })?;
+        if major > 1 {
+            return Err(CoreError::InvalidVersion(format!(
+                "a version 1 string cannot name major version {major}"
+            )));
+        }
 
         // Serialization kind: chars 6..10
-        let kind_tag = &vs[6..10];
-        let kind = SerializationKind::from_tag(kind_tag)?;
+        let kind = SerializationKind::from_tag(&vs[6..10])?;
+        if kind == SerializationKind::Cesr {
+            return Err(CoreError::InvalidVersion(
+                "native CESR serialization does not exist in version 1".into(),
+            ));
+        }
 
         // Size: chars 10..16 (6 hex digits)
         let size_str = &vs[10..16];
@@ -153,26 +247,80 @@ impl Version {
         }
 
         Ok(Self {
-            protocol: protocol.to_string(),
+            protocol,
             major,
             minor,
             kind,
             size,
+            genus: None,
         })
     }
 
-    /// Format this version as a version string.
+    fn parse_v2(vs: &str) -> Result<Self, CoreError> {
+        let protocol = parse_protocol(&vs[0..4])?;
+        let major = b64_to_u8(&vs[4..5], "protocol major")?;
+        let minor = b64_to_u8(&vs[5..7], "protocol minor")?;
+        let genus_major = b64_to_u8(&vs[7..8], "genus major")?;
+        let genus_minor = b64_to_u8(&vs[8..10], "genus minor")?;
+        if major != 2 {
+            return Err(CoreError::InvalidVersion(format!(
+                "a version 2 string must name protocol major version 2, not {major}"
+            )));
+        }
+        if genus_major != 2 {
+            return Err(CoreError::InvalidVersion(format!(
+                "a version 2 string must name genus major version 2, not {genus_major}"
+            )));
+        }
+        let kind = SerializationKind::from_tag(&vs[10..14])?;
+        let size = b64_to_usize(&vs[14..18])?;
+        Ok(Self {
+            protocol,
+            major,
+            minor,
+            kind,
+            size,
+            genus: Some((genus_major, genus_minor)),
+        })
+    }
+
+    /// Format this version as a version string: the 17-character form for
+    /// major version 1 and below, the 19-character form for 2 and above.
     ///
-    /// Produces a 17-character string in the format `PPPPvvSSSSnnnnnnn_`.
+    /// The size is truncated to its field's width; a message too large for
+    /// it is refused when it is serialized (see `Serder::new`).
     pub fn to_version_string(&self) -> String {
-        format!(
-            "{}{:x}{:x}{}{:06x}_",
-            self.protocol,
-            self.major,
-            self.minor,
-            self.kind.tag(),
-            self.size,
-        )
+        if self.major >= 2 {
+            let (gmajor, gminor) = self.genus.unwrap_or((2, 0));
+            format!(
+                "{}{}{}{}{}{}{}.",
+                self.protocol,
+                int_to_b64(self.major.into(), 1),
+                int_to_b64(self.minor.into(), 2),
+                int_to_b64(gmajor.into(), 1),
+                int_to_b64(gminor.into(), 2),
+                self.kind.tag(),
+                int_to_b64(self.size, 4),
+            )
+        } else {
+            format!(
+                "{}{:x}{:x}{}{:06x}_",
+                self.protocol,
+                self.major,
+                self.minor,
+                self.kind.tag(),
+                self.size,
+            )
+        }
+    }
+
+    /// The largest message size this version's size field can hold.
+    pub fn max_size(&self) -> usize {
+        if self.major >= 2 {
+            64usize.pow(4) - 1
+        } else {
+            16usize.pow(6) - 1
+        }
     }
 }
 
@@ -182,7 +330,21 @@ impl std::fmt::Display for Version {
     }
 }
 
+/// The protocol identifiers a version string may name (keripy `Protocols`).
+fn parse_protocol(p: &str) -> Result<String, CoreError> {
+    if p.len() == 4 && p.bytes().all(|b| b.is_ascii_uppercase()) {
+        Ok(p.to_string())
+    } else {
+        Err(CoreError::InvalidVersion(format!(
+            "invalid protocol: {p:?}"
+        )))
+    }
+}
+
 /// Parse a single hex digit character to its numeric value.
+///
+/// keripy's version 1 pattern admits lowercase hex only (`[0-9a-f]`); upper
+/// case is accepted here as it always has been.
 fn hex_digit(ch: u8) -> Option<u8> {
     match ch {
         b'0'..=b'9' => Some(ch - b'0'),
@@ -190,6 +352,39 @@ fn hex_digit(ch: u8) -> Option<u8> {
         b'A'..=b'F' => Some(ch - b'A' + 10),
         _ => None,
     }
+}
+
+/// The value of one Base64 digit.
+pub(crate) fn b64_digit(ch: u8) -> Option<usize> {
+    B64.iter().position(|&c| c == ch)
+}
+
+/// The value of a run of Base64 digits, most significant first.
+pub(crate) fn b64_to_usize(s: &str) -> Result<usize, CoreError> {
+    s.bytes().try_fold(0usize, |acc, ch| {
+        let d = b64_digit(ch).ok_or_else(|| {
+            CoreError::InvalidVersion(format!("invalid Base64 digit {:?} in {s:?}", ch as char))
+        })?;
+        acc.checked_mul(64)
+            .and_then(|a| a.checked_add(d))
+            .ok_or_else(|| CoreError::InvalidVersion(format!("Base64 number {s:?} overflows")))
+    })
+}
+
+fn b64_to_u8(s: &str, what: &str) -> Result<u8, CoreError> {
+    let v = b64_to_usize(s)?;
+    u8::try_from(v).map_err(|_| CoreError::InvalidVersion(format!("{what} {v} is out of range")))
+}
+
+/// `value` as `width` Base64 digits, most significant first. Higher digits
+/// than `width` holds are dropped.
+pub(crate) fn int_to_b64(mut value: usize, width: usize) -> String {
+    let mut out = vec![b'A'; width];
+    for slot in out.iter_mut().rev() {
+        *slot = B64[value % 64];
+        value /= 64;
+    }
+    String::from_utf8(out).expect("Base64 alphabet is ASCII")
 }
 
 #[cfg(test)]
@@ -376,7 +571,58 @@ mod tests {
             SerializationKind::from_tag("MGPK").unwrap(),
             SerializationKind::MsgPack
         );
+        assert_eq!(
+            SerializationKind::from_tag("CESR").unwrap(),
+            SerializationKind::Cesr
+        );
         assert!(SerializationKind::from_tag("XXXX").is_err());
+    }
+
+    #[test]
+    fn a_version_2_string_from_keripy_parses() {
+        // From the keripy v2 fixtures: KERI 2.0, genus 2.0, JSON, 0x12d bytes.
+        let v = Version::parse_str("KERICAACAAJSONAAEt.").unwrap();
+        assert_eq!(v.protocol, "KERI");
+        assert_eq!((v.major, v.minor), (2, 0));
+        assert_eq!(v.genus, Some((2, 0)));
+        assert_eq!(v.kind, SerializationKind::Json);
+        assert_eq!(v.size, 4 * 64 + 45);
+        assert_eq!(v.to_version_string(), "KERICAACAAJSONAAEt.");
+    }
+
+    #[test]
+    fn version_2_round_trips_and_parses_from_bytes() {
+        let v = Version::default_v2(SerializationKind::Json, 1234);
+        let vs = v.to_version_string();
+        assert_eq!(vs.len(), KERI_VER2_FULLSIZE);
+        assert_eq!(Version::parse_str(&vs).unwrap(), v);
+        let mut data = vs.into_bytes();
+        data.extend_from_slice(br#"","t":"icp""#);
+        assert_eq!(Version::parse(&data).unwrap(), v);
+    }
+
+    #[test]
+    fn a_version_1_string_is_still_17_characters() {
+        let v = Version::parse(br#"KERI10JSON0000fd_","t""#).unwrap();
+        assert_eq!(v.genus, None);
+        assert_eq!(v.full_size(), KERI_VER_FULLSIZE);
+    }
+
+    #[test]
+    fn each_form_refuses_the_other_forms_versions() {
+        // keripy `rematch`: a v1 string naming major 2, a v2 string naming
+        // major 1, and native CESR in a v1 string are all refused.
+        assert!(Version::parse_str("KERI20JSON0000fd_").is_err());
+        assert!(Version::parse_str("KERIBAACAAJSONAAEt.").is_err());
+        assert!(
+            Version::parse_str("KERICAABAAJSONAAEt.").is_err(),
+            "genus 1"
+        );
+        assert!(Version::parse_str("KERI10CESR0000fd_").is_err());
+        assert_eq!(
+            Version::parse_str("KERICAACAACESRAAEt.").unwrap().kind,
+            SerializationKind::Cesr
+        );
     }
 
     #[test]

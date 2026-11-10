@@ -25,6 +25,12 @@ pub enum CoreError {
     #[error("MessagePack error: {0}")]
     MsgPack(String),
 
+    /// Something this crate recognises but does not implement, named so a
+    /// caller can tell "not yet supported" from "invalid". Never a reason to
+    /// skip what follows: anything unsupported fails the operation.
+    #[error("not supported: {0}")]
+    Unsupported(String),
+
     /// The event type (ilk) is unexpected or unsupported.
     #[error("unexpected event type: {0}")]
     UnexpectedIlk(String),
@@ -64,4 +70,12 @@ pub enum CoreError {
     /// Generic validation error.
     #[error("validation error: {0}")]
     Validation(String),
+}
+
+impl CoreError {
+    /// The error for a native CESR message body, which this crate recognises
+    /// but cannot yet read (did:webs on KERI v2, position P8).
+    pub fn native_cesr_unsupported() -> Self {
+        Self::Unsupported("native CESR bodies not yet supported".into())
+    }
 }

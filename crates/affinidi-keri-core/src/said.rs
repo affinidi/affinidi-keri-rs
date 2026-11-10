@@ -145,6 +145,7 @@ fn serialize_sad(
         SerializationKind::MsgPack => {
             rmp_serde::to_vec(sad).map_err(|e| CoreError::MsgPack(e.to_string()))
         }
+        SerializationKind::Cesr => Err(CoreError::native_cesr_unsupported()),
     }
 }
 
