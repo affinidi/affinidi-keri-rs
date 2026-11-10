@@ -238,7 +238,7 @@ impl Hab {
             "k": keys,
             "nt": config.next_threshold.to_string(),
             "n": next_key_digests,
-            "bt": config.backer_threshold.to_string(),
+            "bt": format!("{:x}", config.backer_threshold),
             "b": config.backers,
             "c": config.config_traits,
             "a": []
@@ -418,7 +418,7 @@ impl Hab {
             "k": keys,
             "nt": config.next_threshold.to_string(),
             "n": next_key_digests,
-            "bt": self.backer_threshold.to_string(),
+            "bt": format!("{:x}", self.backer_threshold),
             "br": config.backers_remove,
             "ba": config.backers_add,
             // A version 1 `rot` has no `c` field; keripy refuses one that

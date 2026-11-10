@@ -501,8 +501,8 @@ fn parse_sn(sn_str: &str) -> Result<u64, CoreError> {
 
 /// Parse a backer threshold from its string representation.
 fn parse_backer_threshold(bt_str: &str) -> Result<usize, CoreError> {
-    bt_str
-        .parse::<usize>()
+    // Hex, like every KERI number in a field: keripy reads `bt` as a Number.
+    usize::from_str_radix(bt_str, 16)
         .map_err(|_| CoreError::Validation(format!("invalid backer threshold: {bt_str}")))
 }
 

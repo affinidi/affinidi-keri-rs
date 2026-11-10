@@ -100,8 +100,10 @@ impl Threshold {
     pub fn from_json_value(value: &serde_json::Value) -> Result<Self, CoreError> {
         match value {
             serde_json::Value::String(s) => {
-                let n: usize = s
-                    .parse()
+                // A simple threshold is a hex string: keripy reads it with
+                // `int(sith, 16)` and writes it with `:x`, so ten keys at
+                // threshold ten is `"a"`, not `"10"`.
+                let n = usize::from_str_radix(s, 16)
                     .map_err(|_| CoreError::Validation(format!("invalid threshold string: {s}")))?;
                 Ok(Threshold::Simple(n))
             }
@@ -206,7 +208,7 @@ impl Threshold {
     /// Convert this threshold to its JSON representation.
     pub fn to_json_value(&self) -> serde_json::Value {
         match self {
-            Threshold::Simple(n) => serde_json::Value::String(n.to_string()),
+            Threshold::Simple(n) => serde_json::Value::String(format!("{n:x}")),
             Threshold::Weighted(clauses) => {
                 let arr: Vec<serde_json::Value> = clauses
                     .iter()
@@ -289,7 +291,7 @@ pub struct ThresholdValue(pub Threshold);
 impl Serialize for ThresholdValue {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match &self.0 {
-            Threshold::Simple(n) => serializer.serialize_str(&n.to_string()),
+            Threshold::Simple(n) => serializer.serialize_str(&format!("{n:x}")),
             Threshold::Weighted(clauses) => {
                 use serde::ser::SerializeSeq;
                 let mut seq = serializer.serialize_seq(Some(clauses.len()))?;
@@ -506,5 +508,20 @@ mod tests {
         let t = Threshold::Weighted(vec![]);
         assert!(!t.is_satisfied(&[], 0));
         assert!(!t.is_satisfied(&[0], 1));
+    }
+
+    #[test]
+    fn a_simple_threshold_is_hex_as_keripy_writes_it() {
+        let t = Threshold::from_json_value(&serde_json::json!("a")).unwrap();
+        assert_eq!(t, Threshold::Simple(10));
+        assert_eq!(
+            Threshold::Simple(10).to_json_value(),
+            serde_json::json!("a")
+        );
+        assert_eq!(Threshold::Simple(2).to_json_value(), serde_json::json!("2"));
+        assert_eq!(
+            Threshold::from_json_value(&serde_json::json!("10")).unwrap(),
+            Threshold::Simple(16)
+        );
     }
 }
