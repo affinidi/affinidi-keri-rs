@@ -397,6 +397,62 @@ def native_delegated(outdir):
     print(f"{'v2-native-delegated':32} {len(published):6} bytes  keripy sn={kvy.kevers[dip.pre].sn}")
 
 
+def traits(outdir):
+    """Configuration traits. `EO`, `DND` and `DID` are inception-only (KERI
+    spec, Configuration traits field): `EO` drops any interaction event, and
+    a delegated event is dropped when its delegator's KEL has `DND`. keripy
+    applies traits at inception and ignores them in a rotation's `c`."""
+    s = keys(4, "traits")
+    icp = incept(code=DigDex.Blake3_256, keys=[s[0].verfer.qb64], ndigs=[ndig(s[1])], cnfg=["EO"], kind=KIND)
+    pre = icp.pre
+    ixn = interact(pre=pre, dig=icp.said, sn=1, data=[], kind=KIND)
+    scenario(outdir, "v2-eo-interaction", pre, [msg(icp, [(s[0], 0, None)]), msg(ixn, [(s[0], 0, None)])],
+             genus=Vrsn_2_0, expect="refuse-event-1", note="EO at inception: an interaction event is dropped")
+    rot = rotate(pre=pre, keys=[s[1].verfer.qb64], dig=icp.said, ndigs=[ndig(s[2])], sn=1, kind=KIND)
+    scenario(outdir, "v2-eo-rotation", pre, [msg(icp, [(s[0], 0, None)]), msg(rot, [(s[1], 0, None)])],
+             genus=Vrsn_2_0, expect="accept", note="EO at inception: a rotation is accepted")
+
+    t = keys(4, "traits-late")
+    icp = incept(code=DigDex.Blake3_256, keys=[t[0].verfer.qb64], ndigs=[ndig(t[1])], kind=KIND)
+    pre = icp.pre
+    rot = rotate(pre=pre, keys=[t[1].verfer.qb64], dig=icp.said, ndigs=[ndig(t[2])], sn=1,
+                 cnfg=["EO", "DND"], kind=KIND)
+    ixn = interact(pre=pre, dig=rot.said, sn=2, data=[], kind=KIND)
+    scenario(outdir, "v2-eo-in-rotation", pre,
+             [msg(icp, [(t[0], 0, None)]), msg(rot, [(t[1], 0, None)]), msg(ixn, [(t[1], 0, None)])],
+             genus=Vrsn_2_0, expect="accept",
+             note="EO and DND in a rotation's c: inception-only traits, which keripy ignores there; the ixn is accepted")
+
+    dr = keys(2, "dnd-delegator")
+    de = keys(2, "dnd-delegate")
+    icp = incept(code=DigDex.Blake3_256, keys=[dr[0].verfer.qb64], ndigs=[ndig(dr[1])], cnfg=["DND"], kind=KIND)
+    delegator = icp.pre
+    dip = delcept(keys=[de[0].verfer.qb64], delpre=delegator, ndigs=[ndig(de[1])], kind=KIND)
+    ixn = interact(pre=delegator, dig=icp.said, sn=1, data=[{"i": dip.pre, "s": "0", "d": dip.said}], kind=KIND)
+
+    def signed(serder, signer, source=None):
+        sigers = [signer.sign(serder.raw, index=0)]
+        return bytes(messagize(serder, sigers=sigers, bonds=[source] if source else None, gvrsn=Vrsn_2_0))
+
+    msgs = [signed(icp, dr[0]), signed(ixn, dr[0]), signed(dip, de[0], SealSource(s=1, d=ixn.said))]
+    db, kvy = process(msgs)
+    if delegator not in kvy.kevers or kvy.kevers[delegator].sn != 1:
+        raise SystemExit("v2-dnd-delegator: keripy did not accept the delegator's KEL")
+    if dip.pre in kvy.kevers:
+        raise SystemExit("v2-dnd-delegator: keripy accepted a dip under a DND delegator")
+    submitted = bytearray(Counter.makeGVC(version=Vrsn_2_0))
+    for m in msgs:
+        submitted.extend(m)
+    with open(os.path.join(outdir, "v2-dnd-delegator.cesr"), "wb") as f:
+        f.write(bytes(submitted))
+    with open(os.path.join(outdir, "v2-dnd-delegator.json"), "w") as f:
+        json.dump({"note": "a delegator with DND at inception anchors a dip: keripy drops the dip",
+                   "expect": "refuse-dip", "delegator": state(kvy.kevers[delegator]),
+                   "keripy": None}, f, indent=2)
+        f.write("\n")
+    print(f"{'v2-dnd-delegator':32} {len(submitted):6} bytes  keripy dip refused")
+
+
 def native_messages(outdir):
     """One native message of every type keripy reads natively, each with the
     SAD keripy reads from it. A reader must read the same SAD, and verify the
@@ -475,6 +531,7 @@ def main(outdir):
     native(outdir)
     native_delegated(outdir)
     native_messages(outdir)
+    traits(outdir)
     with open(os.path.join(outdir, "KERIPY_VERSION"), "w") as f:
         f.write(f"keripy {keri.__version__} {commit}\n")
 

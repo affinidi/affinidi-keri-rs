@@ -152,6 +152,10 @@ impl DelegatorAnchors for Delegator {
     ) -> Result<Option<Vec<affinidi_keri_core::SadValue>>, CoreError> {
         Ok(Some(self.seals.clone()))
     }
+
+    fn delegator_traits(&self, _delegator: &str) -> Result<Option<Vec<String>>, CoreError> {
+        Ok(Some(Vec::new()))
+    }
 }
 
 /// A delegator with no event at the location the proof names.
@@ -164,6 +168,10 @@ impl DelegatorAnchors for NoSuchEvent {
         _sn: u64,
         _said: &str,
     ) -> Result<Option<Vec<affinidi_keri_core::SadValue>>, CoreError> {
+        Ok(None)
+    }
+
+    fn delegator_traits(&self, _delegator: &str) -> Result<Option<Vec<String>>, CoreError> {
         Ok(None)
     }
 }

@@ -1,0 +1,24 @@
+{
+  "note": "a delegator with DND at inception anchors a dip: keripy drops the dip",
+  "expect": "refuse-dip",
+  "delegator": {
+    "prefix": "EG9k0ntoMHwMST1W63tpoGnNQAmfOPgk1Kcp2FJqDh1K",
+    "sn": 1,
+    "said": "EFYdUE2Hoiz32ygmnHWTJaMVQlQF1XYqO6zHNinJNl8I",
+    "ilk": "ixn",
+    "version": "2.0",
+    "keys": [
+      "DGRKanek1QwGdJws6OtcCwW_1fJeMN5pSJc1Dma9aJ_Z"
+    ],
+    "kt": "1",
+    "n": [
+      "EIYgodhznbsgIrfCEXLDSLP3kCUjF_9gWAZAszMGjd7I"
+    ],
+    "nt": "1",
+    "establishment": {
+      "sn": 0,
+      "said": "EG9k0ntoMHwMST1W63tpoGnNQAmfOPgk1Kcp2FJqDh1K"
+    }
+  },
+  "keripy": null
+}
