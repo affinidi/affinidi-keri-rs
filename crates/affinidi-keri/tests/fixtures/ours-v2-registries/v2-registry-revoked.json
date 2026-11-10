@@ -1,0 +1,54 @@
+{
+  "credentials": [
+    {
+      "acm": {
+        "raw": "{\"v\":\"ACDCCAACAAJSONAAGf.\",\"t\":\"acm\",\"d\":\"EHSZ0feABaqigRluak60EAq5bVpJE6holpXVEdSYYSN0\",\"i\":\"EIyb4Z8rijZjCqM4KwGgD9EUZjAX8Vd5XEMRlsaPqDLF\",\"rd\":\"EEF4tTINZwLTOptZp8zjMEYK3Zj0rFoAHBlRBZ3eCaaz\",\"s\":\"EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA\",\"a\":{\"d\":\"ED4A7-P6dUSWoptvjSAfSt4RZIR0-_i3UzDKaev4cE6A\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\",\"ids\":[\"did:webs:example.com:EIyb4Z8rijZjCqM4KwGgD9EUZjAX8Vd5XEMRlsaPqDLF\"]}}"
+      },
+      "credential": "EHSZ0feABaqigRluak60EAq5bVpJE6holpXVEdSYYSN0",
+      "expect": "revoked",
+      "registry": "EEF4tTINZwLTOptZp8zjMEYK3Zj0rFoAHBlRBZ3eCaaz",
+      "rip": {
+        "anchor": {
+          "said": "EIkYO1vlQCOBmipLXit4NLzpqtYO5ZxDxQnjg-aULK8d",
+          "sn": 1
+        },
+        "raw": "{\"v\":\"ACDCCAACAAJSONAADa.\",\"t\":\"rip\",\"d\":\"EEF4tTINZwLTOptZp8zjMEYK3Zj0rFoAHBlRBZ3eCaaz\",\"u\":\"0AB2dGktcmVnaXN0cnktMDAx\",\"i\":\"EIyb4Z8rijZjCqM4KwGgD9EUZjAX8Vd5XEMRlsaPqDLF\",\"n\":\"0\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\"}"
+      },
+      "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+      "updates": [
+        {
+          "anchor": {
+            "said": "EEouhgU__Ja68gyzQAfpxm0OvKntZxMorjbwxYBICDBn",
+            "sn": 2
+          },
+          "disclosure": {
+            "acdc": "EHSZ0feABaqigRluak60EAq5bVpJE6holpXVEdSYYSN0",
+            "blid": "EJP0Z8uVhRxNWEGeqzFb6jyaDoOltaImdtzgAHdxhDfn",
+            "state": "issued",
+            "uuid": "aIaN3qmyZeq0k497WxCtieALrgBZDOyfTYqq0XLyOgIW"
+          },
+          "raw": "{\"v\":\"ACDCCAACAAJSONAAEi.\",\"t\":\"bup\",\"d\":\"EMbBsx2BkKpFt4igqRGR1tvvJsFw6_MmPtb15sr_sk8J\",\"rd\":\"EEF4tTINZwLTOptZp8zjMEYK3Zj0rFoAHBlRBZ3eCaaz\",\"n\":\"1\",\"p\":\"EEF4tTINZwLTOptZp8zjMEYK3Zj0rFoAHBlRBZ3eCaaz\",\"dt\":\"2026-02-02T00:00:00.000000+00:00\",\"b\":\"EJP0Z8uVhRxNWEGeqzFb6jyaDoOltaImdtzgAHdxhDfn\"}"
+        },
+        {
+          "anchor": {
+            "said": "ECxJFh1IyM8GTuJfdOGv_nUgADcgn_ZV5xh9k7kneunG",
+            "sn": 3
+          },
+          "disclosure": {
+            "acdc": "EHSZ0feABaqigRluak60EAq5bVpJE6holpXVEdSYYSN0",
+            "blid": "ECS2LJWY0zZ5t3E-8mIG_tUHHNtAH8M5wFX6vOcTeiUJ",
+            "state": "revoked",
+            "uuid": "aA3ryU10riRJ0RFCNckswIgV_bPz3VVnrhTodhS-Vsa3"
+          },
+          "raw": "{\"v\":\"ACDCCAACAAJSONAAEi.\",\"t\":\"bup\",\"d\":\"ECiHM-AhlhDgn_scKO_eR-iZ4N9aVS9r_W-ir4NYXGxZ\",\"rd\":\"EEF4tTINZwLTOptZp8zjMEYK3Zj0rFoAHBlRBZ3eCaaz\",\"n\":\"2\",\"p\":\"EMbBsx2BkKpFt4igqRGR1tvvJsFw6_MmPtb15sr_sk8J\",\"dt\":\"2026-02-03T00:00:00.000000+00:00\",\"b\":\"ECS2LJWY0zZ5t3E-8mIG_tUHHNtAH8M5wFX6vOcTeiUJ\"}"
+        }
+      ]
+    }
+  ],
+  "kel": {
+    "prefix": "EIyb4Z8rijZjCqM4KwGgD9EUZjAX8Vd5XEMRlsaPqDLF",
+    "said": "ECxJFh1IyM8GTuJfdOGv_nUgADcgn_ZV5xh9k7kneunG",
+    "sn": 3
+  },
+  "note": "issued, then revoked"
+}
