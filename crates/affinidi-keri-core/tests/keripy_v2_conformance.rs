@@ -322,6 +322,74 @@ fn endorsed_replies_are_composed_as_keripy_composes_them() {
 }
 
 #[test]
+fn a_rotation_reordering_its_committed_keys_verifies() {
+    // keripy signs a key whose prior position differs from its new one with
+    // `2A` (both lists, its own ondex), and a key the prior event did not
+    // commit to current-only (`B`). The ondex comes from the code.
+    accepts("v2-reordered-rotation");
+    let f = fixture("v2-reordered-rotation");
+    let messages = parser::parse_all(&f.published).unwrap();
+    let sigs: Vec<(String, usize, Option<usize>)> = messages[1]
+        .controller_sigs()
+        .iter()
+        .map(|s| (s.code().to_string(), s.index(), s.ondex()))
+        .collect();
+    assert_eq!(
+        sigs,
+        [
+            ("2A".to_string(), 0, Some(1)),
+            ("2A".to_string(), 1, Some(0)),
+            ("B".to_string(), 2, None),
+        ]
+    );
+}
+
+#[test]
+fn a_rotation_supersedes_interaction_events_after_the_last_establishment() {
+    // P7. keripy publishes the superseded ixn 2 and then K's rotation at sn 2,
+    // whose prior is ixn 1. A reader reaches keripy's state: the rotation, at
+    // sn 2, with ixn 2 gone.
+    accepts("v2-superseding-recovery");
+    let f = fixture("v2-superseding-recovery");
+    let ilks: Vec<String> = parser::parse_all(&f.published)
+        .unwrap()
+        .iter()
+        .map(|m| m.serder.ilk().unwrap())
+        .collect();
+    assert_eq!(
+        ilks,
+        ["icp", "ixn", "ixn", "rot"],
+        "the superseded event is published"
+    );
+}
+
+#[test]
+fn a_rotation_never_supersedes_a_rotation() {
+    let f = fixture("v2-rotation-cannot-supersede-rotation");
+    assert_eq!(f.expect, "refuse-event-2");
+    let r = replay(&parser::parse_all(f.submitted.as_ref().unwrap()).unwrap());
+    match &r.refused {
+        Some((2, CoreError::Validation(msg))) if msg.contains("stale rotation") => {}
+        other => panic!("the second rotation at sn 1 must be refused as stale, got {other:?}"),
+    }
+    assert_state("rotation-cannot-supersede-rotation", &r, &f.keripy);
+}
+
+#[test]
+fn a_recovery_cannot_reach_back_past_the_last_establishment() {
+    let f = fixture("v2-stale-recovery");
+    assert_eq!(f.expect, "refuse-event-3");
+    let r = replay(&parser::parse_all(f.submitted.as_ref().unwrap()).unwrap());
+    match &r.refused {
+        Some((3, CoreError::Validation(msg))) if msg.contains("stale rotation") => {}
+        other => {
+            panic!("a rotation at sn 1 after the rotation at sn 1 must be stale, got {other:?}")
+        }
+    }
+    assert_state("stale-recovery", &r, &f.keripy);
+}
+
+#[test]
 fn every_fixture_is_covered() {
     let mut names: Vec<String> = std::fs::read_dir(dir())
         .unwrap()
@@ -344,6 +412,10 @@ fn every_fixture_is_covered() {
             "v2-recovery-by-k",
             "v2-recovery-by-r-and-k",
             "v2-recovery-routine-alone",
+            "v2-reordered-rotation",
+            "v2-rotation-cannot-supersede-rotation",
+            "v2-stale-recovery",
+            "v2-superseding-recovery",
         ],
         "a fixture was added or removed: give it a test above"
     );

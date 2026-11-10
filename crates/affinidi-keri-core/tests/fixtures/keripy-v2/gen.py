@@ -192,6 +192,64 @@ def weighted(outdir):
              note="kt 2 over three keys; icp signed by keys 0 and 2, ixn by 1 and 2")
 
 
+def reordered(outdir):
+    """A rotation whose new keys are in a different order from the prior
+    next-key list, plus a key the prior event did not commit to. keripy signs
+    each committed key with `2A` (both lists, its own ondex) and the new key
+    current-only (`B`, no ondex). A reader must take the ondex from the code."""
+    r, a, b, x, n1, n2, n3 = keys(7, "reordered")
+    icp = incept(code=DigDex.Blake3_256, keys=[r.verfer.qb64], ndigs=[ndig(a), ndig(b)], nsith="2", kind=KIND)
+    pre = icp.pre
+    rot = rotate(pre=pre, keys=[b.verfer.qb64, a.verfer.qb64, x.verfer.qb64], dig=icp.said, isith="2",
+                 ndigs=[ndig(n1), ndig(n2), ndig(n3)], nsith="2", sn=1, kind=KIND)
+    sigers = [b.sign(rot.raw, index=0, ondex=1), a.sign(rot.raw, index=1, ondex=0),
+              x.sign(rot.raw, index=2, only=True)]
+    codes = [(z.code, z.index, z.ondex) for z in sigers]
+    if codes != [("2A", 0, 1), ("2A", 1, 0), ("B", 2, None)]:
+        raise SystemExit(f"v2-reordered-rotation: keripy chose {codes}")
+    msgs = [msg(icp, [(r, 0, None)]), bytes(messagize(rot, sigers=sigers, gvrsn=rot.pvrsn))]
+    scenario(outdir, "v2-reordered-rotation", pre, msgs, genus=Vrsn_2_0, expect="accept",
+             note="rotation to [B, A, X] after n [H(A), H(B)]: A and B sign 2A with their prior positions as ondex, X current-only (B)")
+
+
+def superseding(outdir):
+    """KERI recovery: a rotation supersedes interaction events after the last
+    establishment event (keripy superseding rules A0-A2). The routine key R0
+    signs ixn 1 and ixn 2; the recovery key K then signs a rotation at sn 2
+    whose prior is ixn 1. keripy accepts it, and ixn 2 is superseded."""
+    r0, r1, k, r2, k2 = keys(5, "superseding")
+    nt = [["1/2", "1"]]
+    icp = incept(code=DigDex.Blake3_256, keys=[r0.verfer.qb64], ndigs=[ndig(r1), ndig(k)], nsith=nt, kind=KIND)
+    pre = icp.pre
+    ixn1 = interact(pre=pre, dig=icp.said, sn=1, data=[], kind=KIND)
+    seal = {"i": pre, "s": "0", "d": icp.said}
+    ixn2 = interact(pre=pre, dig=ixn1.said, sn=2, data=[seal], kind=KIND)
+    rot = rotate(pre=pre, keys=[r1.verfer.qb64, k.verfer.qb64], dig=ixn1.said,
+                 ndigs=[ndig(r2), ndig(k2)], nsith=nt, sn=2, kind=KIND)
+    msgs = [msg(icp, [(r0, 0, None)]), msg(ixn1, [(r0, 0, None)]), msg(ixn2, [(r0, 0, None)]),
+            msg(rot, [(k, 1, None)])]
+    scenario(outdir, "v2-superseding-recovery", pre, msgs, genus=Vrsn_2_0, expect="accept",
+             note="icp, ixn 1, ixn 2 (anchoring a seal), then K's rotation at sn 2 after ixn 1: the rotation supersedes ixn 2 and its seal")
+
+    # A1: a rotation never supersedes a rotation.
+    rot1 = rotate(pre=pre, keys=[r1.verfer.qb64, k.verfer.qb64], dig=icp.said,
+                  ndigs=[ndig(r2), ndig(k2)], nsith=nt, sn=1, kind=KIND)
+    rot1b = rotate(pre=pre, keys=[r1.verfer.qb64, k.verfer.qb64], dig=icp.said,
+                   ndigs=[ndig(k2), ndig(r2)], nsith=nt, sn=1, kind=KIND)
+    msgs = [msg(icp, [(r0, 0, None)]), msg(rot1, [(k, 1, None)]), msg(rot1b, [(k, 1, None)])]
+    scenario(outdir, "v2-rotation-cannot-supersede-rotation", pre, msgs, genus=Vrsn_2_0,
+             expect="refuse-event-2", note="two rotations at sn 1: the second supersedes nothing (rule A1)")
+
+    # A stale recovery: a rotation at or before the last establishment event.
+    ixn_a = interact(pre=pre, dig=rot1.said, sn=2, data=[], kind=KIND)
+    rot_stale = rotate(pre=pre, keys=[r2.verfer.qb64, k2.verfer.qb64], dig=icp.said,
+                       ndigs=[ndig(r0), ndig(k)], nsith=nt, sn=1, kind=KIND)
+    msgs = [msg(icp, [(r0, 0, None)]), msg(rot1, [(k, 1, None)]), msg(ixn_a, [(r1, 0, None)]),
+            msg(rot_stale, [(k2, 1, None)])]
+    scenario(outdir, "v2-stale-recovery", pre, msgs, genus=Vrsn_2_0, expect="refuse-event-3",
+             note="a rotation at sn 1, before the last establishment event: stale, not a recovery")
+
+
 def migrated(outdir):
     s = keys(4, "migrated")
     icp = incept(code=DigDex.Blake3_256, keys=[s[0].verfer.qb64], ndigs=[ndig(s[1])], pvrsn=Vrsn_1_0, kind=KIND)
@@ -268,6 +326,8 @@ def main(outdir):
     basic(outdir, Vrsn_2_0, Vrsn_2_0, "v2-basic-native", kind=Kinds.cesr)
     recovery(outdir)
     weighted(outdir)
+    reordered(outdir)
+    superseding(outdir)
     migrated(outdir)
     downgrade(outdir)
     endorsed(outdir)

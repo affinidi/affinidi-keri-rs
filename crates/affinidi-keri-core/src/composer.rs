@@ -268,7 +268,7 @@ mod tests {
     fn a_version_1_endorsement_is_an_f_group_with_a_seqner() {
         let serder = make_test_serder();
         let signer = Signer::new("A", [42u8; 32].to_vec()).unwrap();
-        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, false).unwrap();
         let prefix = serder.prefix().unwrap();
         let said = serder.said().unwrap();
         let out = compose_endorsed(&serder, &prefix, 3, &said, std::slice::from_ref(&sig)).unwrap();
@@ -330,7 +330,7 @@ mod tests {
         });
         said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
         let serder = Serder::new(SerializationKind::Json, sad).unwrap();
-        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, false).unwrap();
         let composed = compose_event(&serder, &[sig]).unwrap();
 
         let text = std::str::from_utf8(&composed).unwrap();
@@ -349,7 +349,7 @@ mod tests {
         let signer = Signer::new("A", [42u8; 32].to_vec()).unwrap();
         let serder = make_test_serder();
 
-        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, false).unwrap();
         let composed = compose_event(&serder, &[sig]).unwrap();
 
         // Should start with the serialized message
@@ -370,8 +370,8 @@ mod tests {
         let signer2 = Signer::new("A", [7u8; 32].to_vec()).unwrap();
         let serder = make_test_serder();
 
-        let sig1 = signer1.sign_indexed(serder.raw(), 0, true).unwrap();
-        let sig2 = signer2.sign_indexed(serder.raw(), 1, true).unwrap();
+        let sig1 = signer1.sign_indexed(serder.raw(), 0, false).unwrap();
+        let sig2 = signer2.sign_indexed(serder.raw(), 1, false).unwrap();
         let composed = compose_event(&serder, &[sig1, sig2]).unwrap();
 
         // Total size: message + 4 (counter) + 88 * 2 (two ed25519 indexed sigs)
@@ -414,7 +414,7 @@ mod tests {
         let signer = Signer::new("A", [42u8; 32].to_vec()).unwrap();
         let serder = make_test_serder();
 
-        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, false).unwrap();
         let composed = compose_witness_sigs(&serder, &[sig]).unwrap();
 
         let att_str = std::str::from_utf8(&composed[serder.size()..]).unwrap();

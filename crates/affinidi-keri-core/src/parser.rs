@@ -701,7 +701,9 @@ fn parse_indexed_sig(data: &[u8]) -> Result<(Siger, usize), CoreError> {
         .chars()
         .next()
         .ok_or_else(|| CoreError::ParseError("empty data for indexed sig".into()))?;
-    let hs = hardage(first_char).ok_or_else(|| {
+    // Indexer codes have their own code lengths: `2A…` is a two-character
+    // code here, where the primitive table would read four.
+    let hs = affinidi_cesr::tables::indexer_hardage(first_char).ok_or_else(|| {
         CoreError::ParseError(format!(
             "unknown hardage for char '{first_char}' in indexed sig"
         ))
@@ -947,7 +949,7 @@ mod tests {
         said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
         let serder = Serder::new(SerializationKind::Json, sad).unwrap();
 
-        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, false).unwrap();
         let composed = composer::compose_event(&serder, &[sig]).unwrap();
 
         // Parse it back
@@ -991,7 +993,7 @@ mod tests {
         });
         said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
         let serder = Serder::new(SerializationKind::Json, sad).unwrap();
-        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, false).unwrap();
 
         let msg1 = composer::compose_event(&serder, std::slice::from_ref(&sig)).unwrap();
         let msg2 = composer::compose_event(&serder, std::slice::from_ref(&sig)).unwrap();

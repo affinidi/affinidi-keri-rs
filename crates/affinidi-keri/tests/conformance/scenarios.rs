@@ -175,7 +175,7 @@ fn recovery() -> Vec<Scenario> {
     assert!(alone.clone().finish().is_err(), "R' alone must not finish");
     let raw = alone.signing_input().to_vec();
     let serder = Serder::from_raw(&raw).unwrap();
-    let siger = r1.sign_indexed(&raw, 0, true).unwrap();
+    let siger = r1.sign_indexed(&raw, 0, false).unwrap();
     let unchecked = compose_event(&serder, &[siger]).unwrap();
     let mut submitted = stream(&[icp, ixn]);
     submitted.extend_from_slice(&unchecked);

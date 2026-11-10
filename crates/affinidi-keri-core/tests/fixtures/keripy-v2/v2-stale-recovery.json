@@ -1,0 +1,28 @@
+{
+  "note": "a rotation at sn 1, before the last establishment event: stale, not a recovery",
+  "expect": "refuse-event-3",
+  "keripy": {
+    "prefix": "EKFj-M-z-k_CwXypO3k1c29Aw5znj74T3WB-xES30XGv",
+    "sn": 2,
+    "said": "EA8DRnhJvt2jlsc_6PeBPtV5tGSwxB-E8zF5zlu7A5EA",
+    "ilk": "ixn",
+    "version": "2.0",
+    "keys": [
+      "DHPDltwW3e0ADGyKvD33S5eKZthIrNMUJMh7vpR9dksJ",
+      "DLkzSRYltEizh6TiqXwaIKybYq6dqEN6a-JnMdAZqi5M"
+    ],
+    "kt": "1",
+    "n": [
+      "EB1RDT9xsbtavI7ETA8S3MxHNnlw5cw29octdm1y437W",
+      "EEOYh-2dSkDtWUsP3cVq02r_8pp-aFOaoR2je3Go9phG"
+    ],
+    "nt": [
+      "1/2",
+      "1"
+    ],
+    "establishment": {
+      "sn": 1,
+      "said": "EG4CJZTDKNRKOmql5oeErpYCALKiM4CHebrgILhGv-Jd"
+    }
+  }
+}

@@ -90,6 +90,9 @@ impl LoggedEvent {
 pub struct IssuerLog {
     prefix: String,
     events: Vec<LoggedEvent>,
+    /// Interaction events a rotation superseded (P7): what only they anchor
+    /// has not happened.
+    superseded: Vec<LoggedEvent>,
     limit: Option<u64>,
 }
 
@@ -97,7 +100,8 @@ pub struct IssuerLog {
 enum Anchoring {
     /// Anchored at or before the limit.
     Within(Anchor),
-    /// Anchored, but only after the limit: it had not happened yet.
+    /// Anchored, but only after the limit, or only in events a rotation
+    /// superseded: it has not happened (yet).
     Later,
     /// Never anchored.
     Absent,
@@ -110,14 +114,25 @@ impl IssuerLog {
         Self {
             prefix: prefix.into(),
             events,
+            superseded: Vec::new(),
             limit: None,
         }
+    }
+
+    /// Record interaction events a rotation superseded. What only they anchor
+    /// is read as not having happened, rather than as unanchored: a recovery
+    /// takes the events it supersedes with it, and with them, say, a
+    /// revocation a compromised key anchored (P7).
+    pub fn with_superseded(mut self, superseded: Vec<LoggedEvent>) -> Self {
+        self.superseded = superseded;
+        self
     }
 
     /// Verify the issuer's KEL from a parsed stream and record it.
     ///
     /// Reads the stream's `icp`, `rot` and `ixn` events for `prefix`, in
-    /// order, through [`Kever`]. A delegated identifier is not supported here;
+    /// order, through [`Kever`]. A rotation that supersedes interaction events
+    /// drops them from the log, with what they anchored. A delegated identifier is not supported here;
     /// a caller that verifies delegation itself builds the log with
     /// [`IssuerLog::new`].
     ///
@@ -126,6 +141,7 @@ impl IssuerLog {
     pub fn replay(stream: &[ParsedMessage], prefix: &str) -> Result<Self, CoreError> {
         let mut kever: Option<Kever> = None;
         let mut events = Vec::new();
+        let mut superseded = Vec::new();
         for msg in stream {
             if !is_keri(msg) || msg.serder.prefix().ok().as_deref() != Some(prefix) {
                 continue;
@@ -154,6 +170,14 @@ impl IssuerLog {
                 _ => continue,
             }
             let k = kever.as_ref().expect("set above");
+            // A superseding rotation takes the log back to its own sequence
+            // number: the interaction events it superseded, and whatever they
+            // anchored, are no longer the issuer's (P7).
+            let (kept, gone): (Vec<LoggedEvent>, Vec<LoggedEvent>) = events
+                .into_iter()
+                .partition(|e: &LoggedEvent| e.sn < k.sn());
+            events = kept;
+            superseded.extend(gone);
             events.push(LoggedEvent {
                 sn: k.sn(),
                 said: msg.serder.said()?,
@@ -172,7 +196,7 @@ impl IssuerLog {
                 "the stream holds no KEL for {prefix}"
             )));
         }
-        Ok(Self::new(prefix, events))
+        Ok(Self::new(prefix, events).with_superseded(superseded))
     }
 
     /// Read as of the KEL event with sequence number `limit` (`versionId`):
@@ -201,6 +225,9 @@ impl IssuerLog {
                 said: e.said.clone(),
             }),
             Some(_) => Anchoring::Later,
+            None if self.superseded.iter().any(|e| e.seals.iter().any(&matches)) => {
+                Anchoring::Later
+            }
             None => Anchoring::Absent,
         }
     }

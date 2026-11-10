@@ -1,0 +1,27 @@
+{
+  "note": "rotation to [B, A, X] after n [H(A), H(B)]: A and B sign 2A with their prior positions as ondex, X current-only (B)",
+  "expect": "accept",
+  "keripy": {
+    "prefix": "EPZDYKV3-FOr1yfeLv9pNuIcG97IzWAnYZOi_DCAUAXc",
+    "sn": 1,
+    "said": "EMmqRsIKBqSZyghw6Dw0Ky_jqYvNTklhURHIawLc6LL1",
+    "ilk": "rot",
+    "version": "2.0",
+    "keys": [
+      "DNrXs9McfAIuvpcMkl4FG7zzsOH-OnhagnJQn_OX-yCT",
+      "DJH2fN0HHMbk_czAf3xoud8X3s3HmbFpQQrtZ_qaGuLq",
+      "DJEBqY26-AChNsA8T-LqdbUHiuJFfwmxa_Ylv2HBm_Ox"
+    ],
+    "kt": "2",
+    "n": [
+      "ECuVA8ukiZsWQL2gpKlpRl8rNwhTDut0yTLQR8HhtjjS",
+      "EEp_RgBztPRcp6HFd0GU-kI5PxZZhmKyxpnCBcidkGUB",
+      "EPR6BnLd-iTLc6XGijsAMlJh1aKywoMU3lJOiFup7ORQ"
+    ],
+    "nt": "2",
+    "establishment": {
+      "sn": 1,
+      "said": "EMmqRsIKBqSZyghw6Dw0Ky_jqYvNTklhURHIawLc6LL1"
+    }
+  }
+}

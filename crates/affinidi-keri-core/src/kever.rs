@@ -25,6 +25,12 @@ use crate::version::SerializationKind;
 pub struct Kever {
     /// The current verified key state.
     state: KeyState,
+    /// The state the last establishment event installed, from which a
+    /// superseding rotation recovers.
+    est: KeyState,
+    /// The interaction events after it, in order: each one's SAID and
+    /// protocol version.
+    since: Vec<(String, u8)>,
     /// Whether the kever has been fully initialized with an inception event.
     pub incepted: bool,
 }
@@ -90,6 +96,8 @@ impl Kever {
         let state = KeyState::from_inception(&icp)?;
 
         Ok(Self {
+            est: state.clone(),
+            since: Vec::new(),
             state,
             incepted: true,
         })
@@ -164,6 +172,8 @@ impl Kever {
         let state = KeyState::from_delegated_inception(&dip)?;
 
         Ok(Self {
+            est: state.clone(),
+            since: Vec::new(),
             state,
             incepted: true,
         })
@@ -221,6 +231,8 @@ impl Kever {
         let state = KeyState::from_inception(&icp)?;
 
         Ok(Self {
+            est: state.clone(),
+            since: Vec::new(),
             state,
             incepted: true,
         })
@@ -228,72 +240,19 @@ impl Kever {
 
     /// Process the next event in the KEL.
     ///
-    /// Handles rotation and interaction events. Validates that:
-    /// - The sequence number is exactly current_sn + 1
-    /// - The prior SAID matches the last event digest
+    /// Handles rotation and interaction events, and a rotation that
+    /// supersedes interaction events (see [`Kever::verify_update`]).
+    /// Validates that:
+    /// - The sequence number is exactly current_sn + 1, or, for a superseding
+    ///   rotation, after the last establishment event
+    /// - The prior SAID matches the digest of the event before it
     /// - Signatures satisfy the current signing threshold
     ///
     /// # Errors
     /// Returns `CoreError` if the event is invalid or out of order.
     pub fn update(&mut self, serder: &Serder, sigs: &[Siger]) -> Result<(), CoreError> {
-        if !self.incepted {
-            return Err(CoreError::Validation(
-                "kever not initialized with inception event".into(),
-            ));
-        }
-
-        // Verify SAID integrity before trusting any event fields
-        serder.verify_said("E")?;
-
-        let ilk = serder.ilk()?;
-        let sn = serder.sn()?;
-
-        // Sequence number must be exactly current + 1
-        if sn != self.state.sn + 1 {
-            return Err(CoreError::OutOfOrder {
-                expected: self.state.sn + 1,
-                got: sn,
-            });
-        }
-
-        match ilk.as_str() {
-            "rot" => {
-                self.reject_plain_rotation_when_delegated()?;
-                check_shape(serder.sad(), "rot")?;
-                let rot: RotationEvent =
-                    serder.sad().deserialize_into().map_err(CoreError::Json)?;
-                // A rotation is signed by the keys it INSTALLS, not the ones it
-                // replaces: authority comes from the prior event's pre-rotation
-                // commitment, proven by those keys signing here. Verifying
-                // against the outgoing key set instead both accepts events
-                // keripy rejects and rejects the ones it produces.
-                self.verify_rotation_sigs(serder.raw(), sigs, &rot.keys, &rot.keys_threshold.0)?;
-                self.state = self.state.apply_rotation(&rot)?;
-            }
-            "ixn" => {
-                // An interaction changes no keys, so it is signed by the
-                // current key set under the current threshold.
-                let verfers = self.build_verfers()?;
-                Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
-                check_shape(serder.sad(), "ixn")?;
-                let ixn: InteractionEvent =
-                    serder.sad().deserialize_into().map_err(CoreError::Json)?;
-                self.state = self.state.apply_interaction(&ixn)?;
-            }
-            "drt" => {
-                return Err(CoreError::UnexpectedIlk(
-                    "'drt' is a delegated rotation; use Kever::verify_update_delegated, \
-                     which verifies the delegator's anchoring seal"
-                        .into(),
-                ));
-            }
-            _ => {
-                return Err(CoreError::UnexpectedIlk(format!(
-                    "expected 'rot' or 'ixn' for update, got '{ilk}'"
-                )));
-            }
-        }
-
+        let new_state = self.verify_update(serder, sigs)?;
+        self.apply_verified_update(new_state);
         Ok(())
     }
 
@@ -316,6 +275,9 @@ impl Kever {
         let ilk = serder.ilk()?;
         let sn = serder.sn()?;
 
+        if ilk == "rot" && sn <= self.state.sn {
+            return self.recovery_base(sn)?.verify_update(serder, sigs);
+        }
         if sn != self.state.sn + 1 {
             return Err(CoreError::OutOfOrder {
                 expected: self.state.sn + 1,
@@ -390,6 +352,9 @@ impl Kever {
         let sn = u64::from_str_radix(sn_str, 16)
             .map_err(|_| CoreError::Validation(format!("invalid sn: {sn_str}")))?;
 
+        if ilk == "rot" && sn <= self.state.sn {
+            return self.recovery_base(sn)?.verify_update_owned(raw, sad, sigs);
+        }
         if sn != self.state.sn + 1 {
             return Err(CoreError::OutOfOrder {
                 expected: self.state.sn + 1,
@@ -468,6 +433,12 @@ impl Kever {
         }
 
         let sn = serder.sn()?;
+        if sn <= self.state.sn {
+            return Err(CoreError::Unsupported(format!(
+                "a delegated rotation at sn {sn} would supersede the event there: \
+                 superseding delegated rotations (KERI recovery rule B) are not supported"
+            )));
+        }
         if sn != self.state.sn + 1 {
             return Err(CoreError::OutOfOrder {
                 expected: self.state.sn + 1,
@@ -487,8 +458,62 @@ impl Kever {
     }
 
     /// Apply a previously verified update (from [`verify_update`]).
+    ///
+    /// After a superseding rotation the state's sequence number goes back:
+    /// the superseded interaction events are no longer part of the log.
     pub fn apply_verified_update(&mut self, new_state: KeyState) {
+        if new_state.said == new_state.last_event_digest {
+            // An establishment event: recovery starts from here.
+            self.est = new_state.clone();
+            self.since.clear();
+        } else {
+            self.since.push((
+                new_state.last_event_digest.clone(),
+                new_state.protocol_major,
+            ));
+        }
         self.state = new_state;
+    }
+
+    /// The state to verify a superseding rotation at `sn` against: the log as
+    /// it stood at `sn - 1`.
+    ///
+    /// KERI's recovery rules for a non-delegated rotation (keripy
+    /// `Kever.update` and its superseding rules A0–A2, b70986f): a rotation
+    /// may supersede interaction events after the last establishment event,
+    /// and nothing else. So `sn` must be after the last establishment event
+    /// and at or before the latest event, which is then an interaction event.
+    /// Interaction events change no keys, so the state at `sn - 1` is the last
+    /// establishment event's, at that event's sequence number and SAID; the
+    /// rotation is then verified exactly as the next event of that log — its
+    /// prior, its signatures against the pre-rotation commitment — and on
+    /// acceptance the events it supersedes are gone. This is how a recovery
+    /// key holder takes back an identifier whose routine key signed events it
+    /// should not have.
+    fn recovery_base(&self, sn: u64) -> Result<Kever, CoreError> {
+        if sn <= self.est.sn {
+            return Err(CoreError::Validation(format!(
+                "stale rotation at sn {sn}: the last establishment event is at sn {}, and a \
+                 rotation supersedes only interaction events after it",
+                self.est.sn
+            )));
+        }
+        // est.sn < sn <= state.sn, so every event in (est.sn, state.sn] is an
+        // interaction event, recorded in `since`.
+        let kept = usize::try_from(sn - 1 - self.est.sn)
+            .map_err(|_| CoreError::Validation("sequence number out of range".into()))?;
+        let mut base = self.est.clone();
+        base.sn = sn - 1;
+        if let Some((said, major)) = kept.checked_sub(1).and_then(|i| self.since.get(i)) {
+            base.last_event_digest = said.clone();
+            base.protocol_major = *major;
+        }
+        Ok(Kever {
+            state: base,
+            est: self.est.clone(),
+            since: self.since[..kept].to_vec(),
+            incepted: true,
+        })
     }
 
     /// Verify signatures over a message using the current key set.
@@ -650,13 +675,18 @@ impl Kever {
     /// Verify a rotation's signatures.
     ///
     /// A rotation is signed by the keys it installs, and must meet two
-    /// thresholds over them: its own `kt`, and the `nt` the prior
-    /// establishment event committed to. The rotation keys correspond
-    /// position for position to that event's next-key digests (checked by
-    /// [`KeyState::apply_rotation`]), so both are read over the same indices.
-    /// Checking `kt` alone would let a rotation lower its own bar: holding one
-    /// of three keys pre-committed under `nt: "2"`, a rotation declaring
-    /// `kt: "1"` would pass.
+    /// thresholds: its own `kt` over those keys, by each signature's `index`;
+    /// and the `nt` the prior establishment event committed to, over the
+    /// committed positions the signatures expose. A signature exposes the
+    /// prior next-key digest at its `ondex` when the key at its `index`
+    /// digests to it (keripy `Kever.exposeds`); a current-only signature
+    /// exposes none. Checking `kt` alone would let a rotation lower its own
+    /// bar: holding one of three keys pre-committed under `nt: "2"`, a
+    /// rotation declaring `kt: "1"` would pass.
+    ///
+    /// The new keys need not be the committed ones, nor in their order: a
+    /// rotation may reorder them, reveal only some (the rest stay in
+    /// reserve), or add keys never committed to.
     fn verify_rotation_sigs(
         &self,
         raw: &[u8],
@@ -673,7 +703,43 @@ impl Kever {
         }
         let verfers = Self::verfers_from_keys(keys)?;
         Self::verify_sigs_static(raw, sigs, &verfers, kt)?;
-        Self::verify_sigs_static(raw, sigs, &verfers, &self.state.next_threshold)
+
+        let prior = &self.state.next_keys;
+        let mut exposed: Vec<usize> = Vec::new();
+        for sig in sigs {
+            let (Some(ondex), Some(key), Some(verfer)) =
+                (sig.ondex(), keys.get(sig.index()), verfers.get(sig.index()))
+            else {
+                continue;
+            };
+            let Some(digest) = prior.get(ondex) else {
+                continue;
+            };
+            if exposed.contains(&ondex)
+                || !verfer.verify(raw, sig.raw()).map_err(CoreError::Crypto)?
+            {
+                continue;
+            }
+            // The digest's own code says how to digest the key (crypto
+            // agility, as keripy); the commitment is over the key's qb64.
+            let diger = Diger::from_qb64(digest).map_err(|e| {
+                CoreError::Validation(format!("invalid prior next-key digest at {ondex}: {e}"))
+            })?;
+            if diger
+                .verify(key.as_bytes())
+                .map_err(|e| CoreError::Validation(format!("next-key digest at {ondex}: {e}")))?
+            {
+                exposed.push(ondex);
+            }
+        }
+        if !self
+            .state
+            .next_threshold
+            .is_satisfied(&exposed, prior.len())
+        {
+            return Err(CoreError::ThresholdNotMet);
+        }
+        Ok(())
     }
 
     /// Static helper to verify indexed signatures against a key set and threshold.
@@ -847,7 +913,7 @@ mod tests {
         let next_signer = make_signer(43);
         let serder = build_inception_serder(&[&signer], &[&next_signer]);
 
-        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, false).unwrap();
         let verfer = signer.verfer().clone();
 
         let kever = Kever::new(&serder, &[sig], &[verfer]).unwrap();
@@ -868,7 +934,7 @@ mod tests {
         });
         said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
         let serder = Serder::new(SerializationKind::Json, sad).unwrap();
-        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, false).unwrap();
         let verfer = signer.verfer().clone();
 
         assert!(Kever::new(&serder, &[sig], &[verfer]).is_err());
@@ -882,7 +948,7 @@ mod tests {
         let serder = build_inception_serder(&[&signer], &[&next_signer]);
 
         // Sign with the wrong key
-        let sig = wrong_signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = wrong_signer.sign_indexed(serder.raw(), 0, false).unwrap();
         let verfer = signer.verfer().clone();
 
         assert!(Kever::new(&serder, &[sig], &[verfer]).is_err());
@@ -893,14 +959,14 @@ mod tests {
         let signer = make_signer(42);
         let next_signer = make_signer(43);
         let serder = build_inception_serder(&[&signer], &[&next_signer]);
-        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, false).unwrap();
         let verfer = signer.verfer().clone();
 
         let kever = Kever::new(&serder, &[sig], &[verfer]).unwrap();
 
         // Verify a message
         let message = b"test message to verify";
-        let msg_sig = signer.sign_indexed(message, 0, true).unwrap();
+        let msg_sig = signer.sign_indexed(message, 0, false).unwrap();
         assert!(kever.verify_sigs(message, &[msg_sig]).unwrap());
     }
 
@@ -912,7 +978,7 @@ mod tests {
 
         // Inception with signer1, committing to signer2 as the next key
         let icp_serder = build_inception_serder(&[&signer1], &[&signer2]);
-        let icp_sig = signer1.sign_indexed(icp_serder.raw(), 0, true).unwrap();
+        let icp_sig = signer1.sign_indexed(icp_serder.raw(), 0, false).unwrap();
         let verfer1 = signer1.verfer().clone();
 
         let mut kever = Kever::new(&icp_serder, &[icp_sig], &[verfer1]).unwrap();
@@ -925,7 +991,7 @@ mod tests {
 
         // Sign the rotation with the keys it INSTALLS (signer2), which the
         // inception committed to by digest — not with the outgoing key.
-        let rot_sig = signer2.sign_indexed(rot_serder.raw(), 0, true).unwrap();
+        let rot_sig = signer2.sign_indexed(rot_serder.raw(), 0, false).unwrap();
         kever.update(&rot_serder, &[rot_sig]).unwrap();
 
         assert_eq!(kever.sn(), 1);
@@ -941,7 +1007,7 @@ mod tests {
 
         // Inception
         let icp_serder = build_inception_serder(&[&signer], &[&next_signer]);
-        let icp_sig = signer.sign_indexed(icp_serder.raw(), 0, true).unwrap();
+        let icp_sig = signer.sign_indexed(icp_serder.raw(), 0, false).unwrap();
         let verfer = signer.verfer().clone();
 
         let mut kever = Kever::new(&icp_serder, &[icp_sig], &[verfer]).unwrap();
@@ -951,7 +1017,7 @@ mod tests {
 
         // Interaction
         let ixn_serder = build_interaction_serder(&prefix, 1, &prior_said);
-        let ixn_sig = signer.sign_indexed(ixn_serder.raw(), 0, true).unwrap();
+        let ixn_sig = signer.sign_indexed(ixn_serder.raw(), 0, false).unwrap();
         kever.update(&ixn_serder, &[ixn_sig]).unwrap();
 
         assert_eq!(kever.sn(), 1);
@@ -966,7 +1032,7 @@ mod tests {
         let next_signer = make_signer(43);
 
         let icp_serder = build_inception_serder(&[&signer], &[&next_signer]);
-        let icp_sig = signer.sign_indexed(icp_serder.raw(), 0, true).unwrap();
+        let icp_sig = signer.sign_indexed(icp_serder.raw(), 0, false).unwrap();
         let verfer = signer.verfer().clone();
 
         let mut kever = Kever::new(&icp_serder, &[icp_sig], &[verfer]).unwrap();
@@ -975,7 +1041,7 @@ mod tests {
 
         // Try interaction with sn=2 (should be 1)
         let ixn_serder = build_interaction_serder(&prefix, 2, &prior_said);
-        let ixn_sig = signer.sign_indexed(ixn_serder.raw(), 0, true).unwrap();
+        let ixn_sig = signer.sign_indexed(ixn_serder.raw(), 0, false).unwrap();
         assert!(kever.update(&ixn_serder, &[ixn_sig]).is_err());
     }
 
@@ -1135,11 +1201,11 @@ mod tests {
             .collect();
 
         // Sign with only 1 signature (threshold is 2) - should fail
-        let sig1 = signer1.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig1 = signer1.sign_indexed(serder.raw(), 0, false).unwrap();
         assert!(Kever::new(&serder, std::slice::from_ref(&sig1), &verfers).is_err());
 
         // Sign with 2 signatures - should succeed
-        let sig2 = signer2.sign_indexed(serder.raw(), 1, true).unwrap();
+        let sig2 = signer2.sign_indexed(serder.raw(), 1, false).unwrap();
         let kever = Kever::new(&serder, &[sig1, sig2], &verfers).unwrap();
         assert!(kever.incepted);
     }
@@ -1186,7 +1252,7 @@ mod tests {
         said::verify_said(&sad, "d", "E", SerializationKind::Json).unwrap();
 
         let serder = Serder::new(SerializationKind::Json, sad).unwrap();
-        let sig = attacker.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = attacker.sign_indexed(serder.raw(), 0, false).unwrap();
         let verfer = attacker.verfer().clone();
 
         // The fix: Kever::new must reject this because the self-addressing
@@ -1233,7 +1299,7 @@ mod tests {
         said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
 
         let serder = Serder::new(SerializationKind::Json, sad).unwrap();
-        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, false).unwrap();
         let verfer = signer.verfer().clone();
 
         let result = Kever::new(&serder, &[sig], &[verfer]);
@@ -1283,7 +1349,7 @@ mod tests {
         signers
             .iter()
             .enumerate()
-            .map(|(i, s)| s.sign_indexed(serder.raw(), i, true).unwrap())
+            .map(|(i, s)| s.sign_indexed(serder.raw(), i, false).unwrap())
             .collect()
     }
 
@@ -1354,6 +1420,89 @@ mod tests {
     }
 
     #[test]
+    fn a_rotation_by_a_key_never_committed_to_does_not_meet_the_prior_threshold() {
+        let k0 = make_signer(1);
+        let n0 = make_signer(10);
+        let stranger = make_signer(99);
+        let kever = incept("1", &[&k0], "1", &[&n0]).unwrap();
+        let prefix = kever.prefix().to_string();
+        let prior = kever.state().last_event_digest.clone();
+        let rot = establishment(
+            "rot",
+            &prefix,
+            1,
+            &prior,
+            "1".into(),
+            &[&stranger],
+            "1".into(),
+            &[&k0],
+        );
+        // Its own `kt` is met; the stranger exposes no committed digest.
+        let sigs = vec![stranger.sign_indexed(rot.raw(), 0, false).unwrap()];
+        assert!(matches!(
+            kever.verify_update(&rot, &sigs),
+            Err(CoreError::ThresholdNotMet)
+        ));
+    }
+
+    #[test]
+    fn a_rotation_may_reveal_part_of_its_commitment_and_add_keys() {
+        // n = [H(A), H(B), H(C)] under nt 2. The rotation reveals C and A, in
+        // that order, keeps B in reserve, and adds X: the signatures of C and
+        // A expose positions 2 and 0, which meet the prior nt.
+        let k0 = make_signer(1);
+        let (a, b, c, x) = (
+            make_signer(10),
+            make_signer(11),
+            make_signer(12),
+            make_signer(13),
+        );
+        let mut kever = incept("1", &[&k0], "2", &[&a, &b, &c]).unwrap();
+        let prefix = kever.prefix().to_string();
+        let prior = kever.state().last_event_digest.clone();
+        let rot = establishment(
+            "rot",
+            &prefix,
+            1,
+            &prior,
+            "2".into(),
+            &[&c, &a, &x],
+            "1".into(),
+            &[&k0],
+        );
+        let both = |s: &Signer, index: usize, ondex: usize| {
+            let raw = s.sign_indexed(rot.raw(), index, false).unwrap();
+            Siger::new_with_verfer(
+                if index == ondex { "A" } else { "2A" },
+                index,
+                Some(ondex),
+                raw.raw().to_vec(),
+                s.verfer().clone(),
+            )
+            .unwrap()
+        };
+        // One signature meets neither kt 2 nor nt 2.
+        let only_c = vec![both(&c, 0, 2)];
+        assert!(kever.verify_update(&rot, &only_c).is_err());
+        // C and the uncommitted X meet kt, but expose one position.
+        let c_and_x = vec![both(&c, 0, 2), x.sign_indexed(rot.raw(), 2, true).unwrap()];
+        assert!(matches!(
+            kever.verify_update(&rot, &c_and_x),
+            Err(CoreError::ThresholdNotMet)
+        ));
+        // A signature claiming the wrong committed position exposes nothing.
+        let wrong = vec![both(&c, 0, 0), both(&a, 1, 2)];
+        assert!(matches!(
+            kever.verify_update(&rot, &wrong),
+            Err(CoreError::ThresholdNotMet)
+        ));
+        // C and A, each naming its committed position.
+        let right = vec![both(&c, 0, 2), both(&a, 1, 0)];
+        kever.update(&rot, &right).unwrap();
+        assert_eq!(kever.state().keys.len(), 3);
+    }
+
+    #[test]
     fn a_rotation_must_meet_the_prior_next_threshold() {
         let k0 = make_signer(1);
         let (n0, n1, n2) = (make_signer(10), make_signer(11), make_signer(12));
@@ -1373,7 +1522,7 @@ mod tests {
             "1".into(),
             &[&k0],
         );
-        let one = vec![n0.sign_indexed(rot.raw(), 0, true).unwrap()];
+        let one = vec![n0.sign_indexed(rot.raw(), 0, false).unwrap()];
         assert!(matches!(
             kever.verify_update(&rot, &one),
             Err(CoreError::ThresholdNotMet)
@@ -1386,8 +1535,8 @@ mod tests {
 
         // Two of the three meet both.
         let two = vec![
-            n0.sign_indexed(rot.raw(), 0, true).unwrap(),
-            n2.sign_indexed(rot.raw(), 2, true).unwrap(),
+            n0.sign_indexed(rot.raw(), 0, false).unwrap(),
+            n2.sign_indexed(rot.raw(), 2, false).unwrap(),
         ];
         kever.update(&rot, &two).unwrap();
         assert_eq!(kever.sn(), 1);

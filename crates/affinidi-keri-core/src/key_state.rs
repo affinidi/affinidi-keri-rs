@@ -3,8 +3,6 @@
 //! KeyState captures the current authoritative state of a KERI
 //! identifier at a given point in its key event log.
 
-use affinidi_keri_crypto::{Diger, Verfer};
-
 use crate::error::CoreError;
 use crate::event::{
     DelegatedInceptionEvent, DelegatedRotationEvent, InceptionEvent, InteractionEvent,
@@ -259,9 +257,11 @@ impl KeyState {
             )));
         }
 
-        // Verify next-key commitments: each rotation key must match a
-        // digest committed to in the previous establishment event.
-        verify_next_key_commitment(&event.keys, &self.next_keys)?;
+        // The prior next-key commitment is met by the rotation's signatures,
+        // not by the shape of its key list: a rotation may reorder the keys it
+        // reveals, reveal only some, or add keys never committed to, as long
+        // as the signatures of revealed committed keys meet the prior `nt`
+        // (keripy `Kever.exposeds`). `Kever` checks that before this runs.
 
         let threshold = event.keys_threshold.0.clone();
         let next_threshold = event.next_threshold.0.clone();
@@ -424,51 +424,6 @@ fn check_key_thresholds(
     }
 }
 
-/// Verify that each rotation key matches a next-key digest commitment.
-///
-/// The rotation keys (`keys`) must correspond positionally to the
-/// committed digests (`next_keys`) from the prior establishment event.
-/// Each key is hashed using the algorithm indicated by the digest's CESR
-/// code, and the result must match the committed digest.
-fn verify_next_key_commitment(keys: &[String], next_keys: &[String]) -> Result<(), CoreError> {
-    if keys.len() != next_keys.len() {
-        return Err(CoreError::Validation(format!(
-            "rotation key count ({}) does not match next-key commitment count ({})",
-            keys.len(),
-            next_keys.len()
-        )));
-    }
-
-    for (i, (key_qb64, digest_qb64)) in keys.iter().zip(next_keys.iter()).enumerate() {
-        let verfer = Verfer::from_qb64(key_qb64).map_err(|e| {
-            CoreError::Validation(format!("invalid rotation key at index {i}: {e}"))
-        })?;
-
-        let diger = Diger::from_qb64(digest_qb64).map_err(|e| {
-            CoreError::Validation(format!("invalid next-key digest at index {i}: {e}"))
-        })?;
-
-        // The commitment is a digest of the key's **qb64** form, not its raw
-        // bytes: that is what keripy commits to, so digesting the raw bytes
-        // rejects every rotation produced by the rest of the ecosystem.
-        // `Verfer::from_qb64` above is what validates the key itself.
-        let _ = &verfer;
-        let matches = diger.verify(key_qb64.as_bytes()).map_err(|e| {
-            CoreError::Validation(format!(
-                "failed to verify next-key commitment at index {i}: {e}"
-            ))
-        })?;
-
-        if !matches {
-            return Err(CoreError::Validation(format!(
-                "rotation key at index {i} does not match next-key commitment"
-            )));
-        }
-    }
-
-    Ok(())
-}
-
 /// The configuration traits after a rotation.
 ///
 /// A version 1 rotation has no `c` field, so it leaves the traits as they
@@ -510,6 +465,7 @@ fn parse_backer_threshold(bt_str: &str) -> Result<usize, CoreError> {
 mod tests {
     use super::*;
     use crate::threshold::ThresholdValue;
+    use affinidi_keri_crypto::Diger;
     use affinidi_keri_crypto::Signer;
 
     /// Create a key qb64 and its next-key digest qb64 from a seed.
@@ -600,80 +556,6 @@ mod tests {
         assert_eq!(new_state.next_keys, vec![next_next_digest]);
         assert_eq!(new_state.said, "SAID_ROT");
         assert_eq!(new_state.last_event_digest, "SAID_ROT");
-    }
-
-    #[test]
-    fn test_apply_rotation_wrong_key_commitment() {
-        let (icp_key, _) = make_key_pair([1u8; 32]);
-        let (_, next_digest) = make_key_pair([2u8; 32]);
-        // Use a different key that does NOT match the committed digest
-        let (wrong_key, _) = make_key_pair([99u8; 32]);
-        let (_, next_next_digest) = make_key_pair([3u8; 32]);
-
-        let icp = make_inception("PREFIX", vec![icp_key], vec![next_digest]);
-        let state = KeyState::from_inception(&icp).unwrap();
-
-        let rot = RotationEvent {
-            version: "KERI10JSON000000_".into(),
-            ilk: "rot".into(),
-            said: "SAID_ROT".into(),
-            prefix: "PREFIX".into(),
-            sn: "1".into(),
-            prior_said: "SAID_ICP".into(),
-            keys_threshold: ThresholdValue::from(1usize),
-            keys: vec![wrong_key],
-            next_threshold: ThresholdValue::from(1usize),
-            next_keys: vec![next_next_digest],
-            backer_threshold: "0".into(),
-            backers_remove: vec![],
-            backers_add: vec![],
-            config: vec![],
-            anchors: vec![],
-        };
-
-        let err = state.apply_rotation(&rot).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("does not match next-key commitment"),
-            "expected commitment mismatch error, got: {err}"
-        );
-    }
-
-    #[test]
-    fn test_apply_rotation_wrong_key_count() {
-        let (icp_key, _) = make_key_pair([1u8; 32]);
-        let (_, next_digest) = make_key_pair([2u8; 32]);
-        let (next_key, _) = make_key_pair([2u8; 32]);
-        let (extra_key, _) = make_key_pair([4u8; 32]);
-        let (_, next_next_digest) = make_key_pair([3u8; 32]);
-
-        let icp = make_inception("PREFIX", vec![icp_key], vec![next_digest]);
-        let state = KeyState::from_inception(&icp).unwrap();
-
-        let rot = RotationEvent {
-            version: "KERI10JSON000000_".into(),
-            ilk: "rot".into(),
-            said: "SAID_ROT".into(),
-            prefix: "PREFIX".into(),
-            sn: "1".into(),
-            prior_said: "SAID_ICP".into(),
-            keys_threshold: ThresholdValue::from(1usize),
-            keys: vec![next_key, extra_key],
-            next_threshold: ThresholdValue::from(1usize),
-            next_keys: vec![next_next_digest],
-            backer_threshold: "0".into(),
-            backers_remove: vec![],
-            backers_add: vec![],
-            config: vec![],
-            anchors: vec![],
-        };
-
-        let err = state.apply_rotation(&rot).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("does not match next-key commitment count"),
-            "expected count mismatch error, got: {err}"
-        );
     }
 
     #[test]

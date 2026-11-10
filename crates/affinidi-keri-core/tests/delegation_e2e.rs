@@ -104,7 +104,7 @@ fn verfers(s: &Signer) -> Vec<Verfer> {
 }
 
 fn sign(serder: &Serder, s: &Signer) -> Vec<affinidi_keri_crypto::Siger> {
-    vec![s.sign_indexed(serder.raw(), 0, true).expect("sign")]
+    vec![s.sign_indexed(serder.raw(), 0, false).expect("sign")]
 }
 
 fn proof() -> DelegationProof {
