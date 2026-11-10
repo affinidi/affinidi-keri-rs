@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-10
+
+Credential registries, in both versions, read and written. Checked against
+keripy 2.1.0-dev1 (b70986f) both ways: keripy-built registries verify here, and
+registries written here verify in keripy (`vet` / `vetBinds`).
+
+### Added
+
+- **Reading registries** (`affinidi_keri_core::registry`): which credentials of
+  a schema, issued by an AID, stand as of a point in its KEL. Covers v1
+  (`vcp`/`iss`/`rev`, `ri`) and v2 (`rip` + `bup`, `rd`, with the blinded state
+  disclosed as `-a` groups).
+  - `IssuerLog::replay` / `IssuerLog::new`, `.as_of(versionId)` (judged by
+    anchor position in the KEL), `registry::designations`.
+  - **Fails resolution, rather than skipping:** a registry event the KEL anchors
+    but the stream leaves out (keripy reads such a credential as issued); an
+    unanchored event; an undisclosed update; duplicity; a broken chain; an
+    unknown state. `upd` is not accepted, matching keripy.
+- **Writing registries** (`registry::write`):
+  - `RegistryState::incept` (`rip`);
+  - `designation` (the `acm` credential, its SAID over the compact form, as
+    keripy computes it);
+  - `update` (`bup` with its `-a` disclosure, a fresh UUID per update);
+  - `RegistryEvent::seal` for the anchoring `ixn`, which the caller signs;
+  - `compose`.
+- Reading the `-a` BlindedStateQuadruples group, and ACDC message field sets per
+  version from keripy.
+- **Conformance fixtures:**
+  - `affinidi-keri-core/tests/fixtures/keripy-v2-registries/`, built by keripy;
+  - `affinidi-keri/tests/fixtures/ours-v2-registries/`, written by us, with
+    `verify_ours_registries.py` to check them in keripy.
+
+
 ## [0.6.0] - 2026-11-10
 
 KERI version 2. The library reads and writes KERI v2 event logs, and both
