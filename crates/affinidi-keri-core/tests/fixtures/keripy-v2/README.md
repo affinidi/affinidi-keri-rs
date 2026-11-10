@@ -8,6 +8,10 @@ A fixture is only written if keripy accepts its own published stream and reaches
 the same key state.
 
 - `<name>.cesr`: the published stream.
+- `<name>.submitted.cesr` (only where `expect` is not `accept`): the messages
+  as submitted, with a genus-version counter at each version change. keripy
+  publishes only what it accepted, so a refused event appears only here.
+  keripy reads this stream to the same state as it reached directly.
 - `<name>.json`:
   - `keripy`: the key state keripy reached;
   - `expect`: what a verifier conforming to VTI's positions must do (`accept`,

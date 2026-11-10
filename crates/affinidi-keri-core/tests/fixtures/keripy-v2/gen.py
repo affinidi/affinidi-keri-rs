@@ -119,6 +119,25 @@ def scenario(outdir, name, pre, msgs, *, genus, expect, note):
 
     with open(os.path.join(outdir, f"{name}.cesr"), "wb") as f:
         f.write(published)
+
+    if expect != "accept":
+        # keripy publishes only what it accepted, so the refused event is not
+        # in <name>.cesr. Write what was submitted too, with a genus-version
+        # counter wherever the version changes, and check keripy reads that
+        # stream to the same result.
+        submitted = bytearray()
+        current = None
+        for m in msgs:
+            g = genus_of(m)
+            if g != current and not (current is None and g == Vrsn_1_0):
+                submitted.extend(Counter.makeGVC(version=g))
+            current = g
+            submitted.extend(m)
+        _, kvy3 = process([bytes(submitted)], version=Vrsn_1_0)
+        if state(kvy3.kevers[pre] if pre in kvy3.kevers else None) != state(kever):
+            raise SystemExit(f"{name}: keripy reads the submitted stream differently")
+        with open(os.path.join(outdir, f"{name}.submitted.cesr"), "wb") as f:
+            f.write(bytes(submitted))
     with open(os.path.join(outdir, f"{name}.json"), "w") as f:
         json.dump({"note": note, "expect": expect, "keripy": state(kever)}, f, indent=2)
         f.write("\n")
