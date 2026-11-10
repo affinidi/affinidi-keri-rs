@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-10
+
+What did:webs needs to write KERI 2.0 (affinidi-did-webs 0.11). Checked against
+keripy 2.1.0-dev1 (b70986f).
+
+### Added
+
+- **`composer::compose_endorsed`**: a message signed by a transferable AID, one
+  transferable indexed signature group (`-F` in 1.x, `-X` in 2.x) naming the
+  establishment event. In 2.x the sequence number is a `Number` in its smallest
+  code (`MAAB`), as keripy's `messagize` writes it. Reproduces keripy's bytes
+  (new keripy fixture `v2-endorsed-replies`).
+- **`RegistryState::resume`**: the state to continue a 2.x registry from,
+  read from the published stream and checked as the reader checks it. A writer
+  needs no registry store of its own.
+- **`designation_with_rules`** (and `RegistryState::designation_with_rules`):
+  a designation with the rules section `r` its schema requires; the SAID covers
+  both sections compact. New fixture `v2-designation-with-rules`, which keripy
+  verifies.
+- **`parser::number_value`**: a sequence number as an attachment carries it, a
+  1.x `Seqner` or a 2.x `Number`.
+
+### Fixed
+
+- **A 1.x credential's signature group must name its establishment event's own
+  sequence number.** keripy looks the event up by the number and then compares
+  the SAID, so a group with the right SAID at the wrong number verified here
+  and nowhere else.
+
 ## [0.6.1] - 2026-11-10
 
 Credential registries, in both versions, read and written. Checked against
