@@ -104,6 +104,18 @@ pub trait DelegatorAnchors {
         sn: u64,
         said: &str,
     ) -> Result<Option<Vec<crate::sad::SadValue>>, CoreError>;
+
+    /// The configuration traits of `delegator`'s **verified** key state (its
+    /// inception's `c`, and what a version 2 rotation may add), or `Ok(None)`
+    /// when its KEL is not available or does not verify.
+    ///
+    /// A delegation under a delegator with `DND` is refused, so this has no
+    /// default: an implementation that answered "no traits" without looking
+    /// would let every such delegation through.
+    ///
+    /// # Errors
+    /// Returns `CoreError` if the lookup itself fails.
+    fn delegator_traits(&self, delegator: &str) -> Result<Option<Vec<String>>, CoreError>;
 }
 
 /// Verify that `delegator` authorised the delegated event identified by
@@ -138,6 +150,23 @@ pub fn verify_delegation(
             proof.sn, proof.said,
         )));
     };
+
+    // KERI spec, Configuration traits field: a validator drops any delegated
+    // event whose delegator has `DND`.
+    let Some(traits) = source.delegator_traits(delegator)? else {
+        return Err(CoreError::Validation(format!(
+            "delegator '{delegator}' has no verified key state to authorise the delegation \
+             of '{delegatee}'"
+        )));
+    };
+    if traits
+        .iter()
+        .any(|t| t == crate::key_state::DO_NOT_DELEGATE)
+    {
+        return Err(CoreError::Validation(format!(
+            "delegator '{delegator}' does not delegate (DND): '{delegatee}' is refused"
+        )));
+    }
 
     // The delegator anchors the delegated event by its sequence number in hex,
     // which is how KERI writes `s` throughout.
@@ -179,6 +208,37 @@ mod tests {
         ) -> Result<Option<Vec<crate::sad::SadValue>>, CoreError> {
             Ok(self.0.clone())
         }
+
+        fn delegator_traits(&self, _delegator: &str) -> Result<Option<Vec<String>>, CoreError> {
+            Ok(Some(Vec::new()))
+        }
+    }
+
+    /// A delegator that anchors the event but has `DND`.
+    struct DoesNotDelegate(Vec<crate::sad::SadValue>);
+
+    impl DelegatorAnchors for DoesNotDelegate {
+        fn anchors_at(
+            &self,
+            _delegator: &str,
+            _sn: u64,
+            _said: &str,
+        ) -> Result<Option<Vec<crate::sad::SadValue>>, CoreError> {
+            Ok(Some(self.0.clone()))
+        }
+
+        fn delegator_traits(&self, _delegator: &str) -> Result<Option<Vec<String>>, CoreError> {
+            Ok(Some(vec!["DND".into()]))
+        }
+    }
+
+    #[test]
+    fn a_delegator_with_dnd_authorises_nothing() {
+        let seal = crate::sad!({ "i": DELEGATEE, "s": "0", "d": EVENT_SAID });
+        let source = DoesNotDelegate(vec![seal]);
+        let err = verify_delegation(DELEGATEE, 0, EVENT_SAID, DELEGATOR, &proof(), &source)
+            .expect_err("DND refuses the delegation even when it is anchored");
+        assert!(err.to_string().contains("DND"), "{err}");
     }
 
     fn proof() -> DelegationProof {

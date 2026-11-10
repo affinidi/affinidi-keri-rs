@@ -400,9 +400,10 @@ impl Kever {
     ///
     /// Checks everything `verify_update` checks for a rotation — sequence
     /// ordering, prior-event digest, signatures against the current key set,
-    /// the pre-rotation commitment — and additionally that the delegator named
-    /// in `di` anchored this exact event, and is the same delegator the
-    /// identifier was incepted under.
+    /// the pre-rotation commitment — and additionally that the delegator the
+    /// identifier was incepted under anchored this exact event. A `drt` names
+    /// no delegator of its own; one carrying `di` is refused, as keripy
+    /// refuses it.
     ///
     /// Returns the proposed state; commit it with
     /// [`apply_verified_update`](Self::apply_verified_update).
@@ -447,13 +448,17 @@ impl Kever {
             });
         }
 
+        check_shape(serder.sad(), "drt")?;
         let drt: DelegatedRotationEvent =
             serder.sad().deserialize_into().map_err(CoreError::Json)?;
+        let delegator = self.state.delegator.as_deref().ok_or_else(|| {
+            CoreError::Validation("delegated identifier has no recorded delegator".into())
+        })?;
 
         // Like a plain rotation, signed by the keys it installs.
         self.verify_rotation_sigs(serder.raw(), sigs, &drt.keys, &drt.keys_threshold.0)?;
 
-        delegation::verify_delegation(&drt.prefix, sn, &drt.said, &drt.delegator, proof, source)?;
+        delegation::verify_delegation(&drt.prefix, sn, &drt.said, delegator, proof, source)?;
 
         self.state.apply_delegated_rotation(&drt)
     }
@@ -779,10 +784,6 @@ impl Kever {
 
 /// Check an event's top-level fields against keripy's list for its type and
 /// protocol version, before any field of it is trusted.
-///
-/// `drt` is not checked: keripy's `drt` has no `di` (and in version 1 no `c`),
-/// while this crate's `DelegatedRotationEvent` requires both — a divergence
-/// to resolve with delegated rotation's own conformance work.
 fn check_shape(sad: &crate::sad::SadValue, ilk: &str) -> Result<(), CoreError> {
     let major = crate::fields::protocol_major(sad)?;
     crate::fields::check_keri_fields(sad, major, ilk)

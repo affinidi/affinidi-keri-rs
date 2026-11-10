@@ -1,0 +1,23 @@
+{
+  "note": "EO at inception: a rotation is accepted",
+  "expect": "accept",
+  "keripy": {
+    "prefix": "EENtWhQJkEY5sHpEvJwPzpiWzFAvsJVOThQii8kFx5XU",
+    "sn": 1,
+    "said": "EJ8FiPfzOAmN3BEmooRHJtYG9M8MHUuzjv4PgUw0ek0X",
+    "ilk": "rot",
+    "version": "2.0",
+    "keys": [
+      "DETPnCe8jk74SCKNtwTZ5Ap7jiHsBLaJ4k68QlNcFHyR"
+    ],
+    "kt": "1",
+    "n": [
+      "ELKjtD56iy9puiZsxqMjKQp4mB0gSt-0H4M0X_qzS_bo"
+    ],
+    "nt": "1",
+    "establishment": {
+      "sn": 1,
+      "said": "EJ8FiPfzOAmN3BEmooRHJtYG9M8MHUuzjv4PgUw0ek0X"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "note": "EO at inception: an interaction event is dropped",
+  "expect": "refuse-event-1",
+  "keripy": {
+    "prefix": "EENtWhQJkEY5sHpEvJwPzpiWzFAvsJVOThQii8kFx5XU",
+    "sn": 0,
+    "said": "EENtWhQJkEY5sHpEvJwPzpiWzFAvsJVOThQii8kFx5XU",
+    "ilk": "icp",
+    "version": "2.0",
+    "keys": [
+      "DIpyb2xxQx6FuTJ4rMbPKd_DtP8rwvdMuUGnTsuQZr9S"
+    ],
+    "kt": "1",
+    "n": [
+      "EEMCWPnSs9Bi-d2Ay8e0cVnneaGGrlO--WLvt7-6tArJ"
+    ],
+    "nt": "1",
+    "establishment": {
+      "sn": 0,
+      "said": "EENtWhQJkEY5sHpEvJwPzpiWzFAvsJVOThQii8kFx5XU"
+    }
+  }
+}
