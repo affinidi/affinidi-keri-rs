@@ -9,6 +9,7 @@ pub mod ilk;
 pub mod kever;
 pub mod key_state;
 pub mod parser;
+pub mod registry;
 pub mod sad;
 pub mod said;
 pub mod seal;
