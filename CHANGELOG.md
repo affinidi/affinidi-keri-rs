@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-10
+
+Rotations as keripy verifies them, and superseding recovery. Checked against
+keripy 2.1.0-dev1 (b70986f) with new keripy fixtures. Requires affinidi-cesr
+0.1.4.
+
+### Changed (breaking)
+
+- **A rotation's prior next threshold is met by the committed positions its
+  signatures expose** (keripy `Kever.exposeds`): a signature exposes the
+  digest at its ondex when the key at its index digests to it; a current-only
+  signature exposes none. A rotation may reorder its keys, reveal only some
+  (the rest stay in reserve), or add keys never committed to. Before, it had
+  to list every committed key, in order, and keripy's reordered rotations were
+  refused. `KeyState::apply_rotation` no longer checks the commitment; `Kever`
+  does, from the signatures.
+- **`Signer::sign_indexed(message, index, only)` takes keripy's meaning of
+  `only`**: `true` signs current-only (`B`, `D`, `F`), `false` both lists at
+  the same position (`A`, `C`, `E`), keripy's default. It was the other way
+  round. Pass `false` to keep writing what was written before.
+
+### Added
+
+- **Superseding recovery (P7)**: a non-delegated rotation after the last
+  establishment event may supersede the interaction events there (keripy's
+  rules A0–A2). A rotation never supersedes a rotation; a superseding `drt`
+  (rule B) is refused as unsupported. `Kever::update` is `verify_update` then
+  `apply_verified_update`.
+- `IssuerLog::with_superseded`: a registry event anchored only in superseded
+  events reads as not having happened, so a recovery undoes, say, a
+  revocation a compromised key anchored. `IssuerLog::replay` records them.
+- Keripy fixtures `v2-reordered-rotation`, `v2-superseding-recovery`,
+  `v2-rotation-cannot-supersede-rotation`, `v2-stale-recovery`.
+
+### Fixed
+
+- **Big indexed signatures (`2A…`) parse**, with the indexer's own code
+  lengths (via affinidi-cesr 0.1.4, which also reads `A` as both lists and
+  `B` as current only).
+
 ## [0.6.2] - 2026-11-10
 
 What did:webs needs to write KERI 2.0 (affinidi-did-webs 0.11). Checked against
