@@ -131,6 +131,116 @@ pub fn check_keri_fields(sad: &SadValue, major: u8, ilk: &str) -> Result<(), Cor
     Ok(())
 }
 
+/// The top-level fields of an ACDC protocol message: every field it may
+/// carry, in order (`alls`), and which of them it may leave out (`opts`).
+///
+/// keripy's `Serder.Fields` for the ACDC protocol (`serdering.py`, b70986f).
+/// `ilk` `None` is a bare ACDC, which carries no `t`. The attribute section
+/// `a` and the aggregate section `A` are alternatives: a message carries at
+/// most one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AcdcFields {
+    /// Every field the message may carry, in order.
+    pub alls: &'static [&'static str],
+    /// The fields it may leave out.
+    pub opts: &'static [&'static str],
+}
+
+const ACDC: &[(u8, Option<&str>, AcdcFields)] = &[
+    (
+        1,
+        None,
+        AcdcFields {
+            alls: &["v", "d", "u", "i", "ri", "s", "a", "A", "e", "r"],
+            opts: &["u", "ri", "a", "A", "e", "r"],
+        },
+    ),
+    (
+        2,
+        None,
+        AcdcFields {
+            alls: &["v", "d", "u", "i", "rd", "s", "a", "A", "e", "r"],
+            opts: &["u", "rd", "a", "A", "e", "r"],
+        },
+    ),
+    (
+        2,
+        Some("acm"),
+        AcdcFields {
+            alls: &["v", "t", "d", "u", "i", "rd", "s", "a", "A", "e", "r"],
+            opts: &["t", "u", "rd", "a", "A", "e", "r"],
+        },
+    ),
+    (
+        2,
+        Some("rip"),
+        AcdcFields {
+            alls: &["v", "t", "d", "u", "i", "n", "dt"],
+            opts: &[],
+        },
+    ),
+    (
+        2,
+        Some("bup"),
+        AcdcFields {
+            alls: &["v", "t", "d", "rd", "n", "p", "dt", "b"],
+            opts: &[],
+        },
+    ),
+];
+
+/// The fields of an ACDC protocol message of type `ilk` (`None` for a bare
+/// ACDC) in protocol major version `major`. `None` if this crate does not
+/// model that message.
+pub fn acdc_fields(major: u8, ilk: Option<&str>) -> Option<AcdcFields> {
+    ACDC.iter()
+        .find(|(m, i, _)| *m == major && *i == ilk)
+        .map(|(_, _, f)| *f)
+}
+
+/// Check an ACDC protocol message's top-level fields: each is one of its
+/// type's fields, in that type's order; every field that is not optional is
+/// present; and it carries at most one of `a` and `A`.
+///
+/// # Errors
+/// Returns [`CoreError::Validation`] if they are not, or
+/// [`CoreError::Unsupported`] if this crate does not model the message type.
+pub fn check_acdc_fields(sad: &SadValue, major: u8, ilk: Option<&str>) -> Result<(), CoreError> {
+    let name = ilk.unwrap_or("bare ACDC");
+    let fields = acdc_fields(major, ilk).ok_or_else(|| {
+        CoreError::Unsupported(format!(
+            "ACDC {major}.x '{name}' messages are not supported"
+        ))
+    })?;
+    let obj = sad
+        .as_object()
+        .ok_or_else(|| CoreError::Validation("an ACDC message is a field map".into()))?;
+    let got: Vec<&str> = obj.keys().map(String::as_str).collect();
+    let mut cursor = fields.alls.iter();
+    for label in &got {
+        if !cursor.by_ref().any(|f| f == label) {
+            return Err(CoreError::Validation(format!(
+                "an ACDC {major}.x '{name}' has the fields {:?}, in that order; \
+                 this one has {got:?}",
+                fields.alls
+            )));
+        }
+    }
+    for required in fields.alls.iter().filter(|f| !fields.opts.contains(f)) {
+        if !got.contains(required) {
+            return Err(CoreError::Validation(format!(
+                "an ACDC {major}.x '{name}' must carry '{required}'"
+            )));
+        }
+    }
+    if got.contains(&"a") && got.contains(&"A") {
+        return Err(CoreError::Validation(format!(
+            "an ACDC {major}.x '{name}' carries both an attribute and an aggregate section"
+        )));
+    }
+    Ok(())
+}
+
 /// The protocol major version a message's `v` field names.
 ///
 /// # Errors
@@ -351,6 +461,79 @@ mod tests {
                 "{major}.x has a message type keripy does not, or lacks one it has"
             );
         }
+    }
+
+    /// keripy's ACDC protocol definitions, copied verbatim from
+    /// `keri/core/serdering.py` at b70986f (`Serder.Fields`, ACDC protocol).
+    const KERIPY_ACDC: &[(u8, Option<&str>, &str, &str)] = &[
+        (
+            1,
+            None,
+            "v='', d='', u='', i='',
+                        ri='', s='', a='', A='', e='', r=''",
+            "u='', ri='', a='', A='', e='', r=''",
+        ),
+        (
+            2,
+            None,
+            "v='', d='', u='', i='',
+                        rd='', s='', a='', A='', e='', r=''",
+            "u='', rd='', a='', A='', e='', r=''",
+        ),
+        (
+            2,
+            Some("acm"),
+            "v='', t='', d='', u='', i='',
+                        rd='', s='', a='', A='', e='', r=''",
+            "t='', u='', rd='', a='', A='', e='', r=''",
+        ),
+        (
+            2,
+            Some("rip"),
+            "v='', t='', d='', u='', i='',
+                                              n='', dt=''",
+            "",
+        ),
+        (
+            2,
+            Some("bup"),
+            "v='', t='', d='', rd='', n='',
+                                              p='', dt='', b=''",
+            "",
+        ),
+    ];
+
+    #[test]
+    fn acdc_field_lists_are_keripys() {
+        for (major, ilk, alls, opts) in KERIPY_ACDC {
+            let ours = acdc_fields(*major, *ilk).unwrap_or_else(|| panic!("no {major}.x {ilk:?}"));
+            let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+            assert_eq!(strs(ours.alls), labels(alls), "{major}.x {ilk:?} alls");
+            assert_eq!(strs(ours.opts), labels(opts), "{major}.x {ilk:?} opts");
+        }
+        assert_eq!(ACDC.len(), KERIPY_ACDC.len());
+    }
+
+    #[test]
+    fn acdc_fields_follow_order_presence_and_the_a_or_aggregate_rule() {
+        let bup = crate::sad!({"v": "", "t": "bup", "d": "", "rd": "", "n": "1", "p": "", "dt": "", "b": ""});
+        check_acdc_fields(&bup, 2, Some("bup")).unwrap();
+        let no_b =
+            crate::sad!({"v": "", "t": "bup", "d": "", "rd": "", "n": "1", "p": "", "dt": ""});
+        assert!(check_acdc_fields(&no_b, 2, Some("bup")).is_err());
+        let acm = crate::sad!({"v": "", "t": "acm", "d": "", "i": "", "rd": "", "s": "", "a": {}});
+        check_acdc_fields(&acm, 2, Some("acm")).unwrap();
+        let swapped =
+            crate::sad!({"v": "", "t": "acm", "d": "", "rd": "", "i": "", "s": "", "a": {}});
+        assert!(check_acdc_fields(&swapped, 2, Some("acm")).is_err());
+        let both = crate::sad!({"v": "", "t": "acm", "d": "", "i": "", "s": "", "a": {}, "A": []});
+        assert!(check_acdc_fields(&both, 2, Some("acm")).is_err());
+        let v1 = crate::sad!({"v": "", "d": "", "i": "", "ri": "", "s": "", "a": {}});
+        check_acdc_fields(&v1, 1, None).unwrap();
+        assert!(
+            check_acdc_fields(&v1, 2, None).is_err(),
+            "ri is a 1.x field"
+        );
     }
 
     #[test]
