@@ -31,7 +31,7 @@ use affinidi_keri_crypto::Diger;
 use serde::{Deserialize, Serialize};
 
 use super::Anchor;
-use crate::composer::{frame, push_group};
+use crate::composer::{frame, number, push_group};
 use crate::counter_table::{CounterTable, GroupKind};
 use crate::error::CoreError;
 use crate::parser::BlindedState;
@@ -225,6 +225,28 @@ impl RegistryState {
         ))
     }
 
+    /// Continue `registry` from the published stream: the state after its
+    /// latest update the issuer's KEL anchors.
+    ///
+    /// Read and checked as [`designations`](super::designations) reads a
+    /// registry: the inception is the log's issuer's and anchored, the updates
+    /// form a chain, and every registry event the KEL anchors is in the
+    /// stream. So a caller needs no store of its own, and cannot continue from
+    /// a state that the stream it publishes contradicts.
+    ///
+    /// # Errors
+    /// Returns [`RegistryError`](super::RegistryError) if the registry is
+    /// missing, not the issuer's, unanchored or broken, or if the KEL anchors
+    /// a registry event the stream leaves out.
+    pub fn resume(
+        stream: &[crate::parser::ParsedMessage],
+        log: &super::IssuerLog,
+        registry: &str,
+    ) -> Result<Self, super::RegistryError> {
+        super::check_anchored_events_present(stream, log)?;
+        super::v2::head(stream, log, registry)
+    }
+
     /// A designation credential of `schema`, bound to this registry, with the
     /// attribute block `attributes` (an object; its `d` is computed).
     ///
@@ -240,6 +262,27 @@ impl RegistryState {
         attributes: &SadValue,
     ) -> Result<Designation, CoreError> {
         designation(&self.issuer, &self.registry, schema, attributes)
+    }
+
+    /// As [`designation`](Self::designation), with a rules section `r` (an
+    /// object; its `d` is computed), which a schema that requires `r` needs.
+    ///
+    /// # Errors
+    /// Returns [`CoreError`] if `attributes` or `rules` is not an object or
+    /// the credential cannot be serialized.
+    pub fn designation_with_rules(
+        &self,
+        schema: &str,
+        attributes: &SadValue,
+        rules: &SadValue,
+    ) -> Result<Designation, CoreError> {
+        designation_with_rules(
+            &self.issuer,
+            &self.registry,
+            schema,
+            attributes,
+            Some(rules),
+        )
     }
 
     /// An update disclosing `state` for `credential`, salted with `uuid`.
@@ -297,27 +340,37 @@ pub fn designation(
     schema: &str,
     attributes: &SadValue,
 ) -> Result<Designation, CoreError> {
-    let Some(given) = attributes.as_object() else {
-        return Err(CoreError::Validation(
-            "a designation's attribute block must be an object".into(),
-        ));
-    };
-    // `d` first, as keripy orders it, then the attributes as given.
-    let mut block = SadMap::new();
-    block.insert("d".into(), SadValue::String(String::new()));
-    for (k, v) in given {
-        if k != "d" {
-            block.insert(k.clone(), v.clone());
-        }
-    }
-    let block = fill_section(SadValue::Object(block))?;
-    let block_said = block
-        .get("d")
-        .and_then(SadValue::as_str)
-        .unwrap_or_default()
-        .to_string();
+    designation_with_rules(issuer, registry, schema, attributes, None)
+}
 
-    let build = |a: SadValue| {
+/// A designation credential (`acm`) of `schema`, issued by `issuer`, bound to
+/// `registry`, with the attribute block `attributes` and, if given, the rules
+/// section `rules`.
+///
+/// Each section is published expanded with its own SAID first (`d`), and the
+/// credential's SAID is computed over the compact form, each section replaced
+/// by its SAID (keripy `SerderACDC._compute`).
+///
+/// # Errors
+/// Returns [`CoreError`] if `attributes` or `rules` is not an object or the
+/// credential cannot be serialized.
+pub fn designation_with_rules(
+    issuer: &str,
+    registry: &str,
+    schema: &str,
+    attributes: &SadValue,
+    rules: Option<&SadValue>,
+) -> Result<Designation, CoreError> {
+    let block = section(attributes, "attribute block")?;
+    let rules = rules.map(|r| section(r, "rules section")).transpose()?;
+    let said_of = |s: &SadValue| {
+        s.get("d")
+            .and_then(SadValue::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+
+    let build = |a: SadValue, r: Option<SadValue>| {
         let mut sad = SadMap::new();
         sad.insert("v".into(), SadValue::String(acdc_version(0)));
         sad.insert("t".into(), SadValue::String("acm".into()));
@@ -326,19 +379,43 @@ pub fn designation(
         sad.insert("rd".into(), SadValue::String(registry.into()));
         sad.insert("s".into(), SadValue::String(schema.into()));
         sad.insert("a".into(), a);
+        if let Some(r) = r {
+            sad.insert("r".into(), r);
+        }
         SadValue::Object(sad)
     };
 
-    // The SAID is over the most compact form: the attribute block replaced by
-    // its SAID, and the version string sized for that form.
-    let (said, _) = saidify(build(SadValue::String(block_said)))?;
+    // The SAID is over the most compact form: each section replaced by its
+    // SAID, and the version string sized for that form.
+    let (said, _) = saidify(build(
+        SadValue::String(said_of(&block)),
+        rules.as_ref().map(|r| SadValue::String(said_of(r))),
+    ))?;
 
     // Published expanded, with the version string sized for what is published.
-    let mut expanded = build(block);
+    let mut expanded = build(block, rules);
     size_version(&mut expanded)?;
     expanded.insert("d", SadValue::String(said.clone()));
     let raw = serde_json::to_vec(&expanded)?;
     Ok(Designation { said, raw })
+}
+
+/// A section (`a` or `r`) with its SAID computed: `d` first, as keripy orders
+/// it, then the fields as given.
+fn section(given: &SadValue, what: &str) -> Result<SadValue, CoreError> {
+    let Some(given) = given.as_object() else {
+        return Err(CoreError::Validation(format!(
+            "a designation's {what} must be an object"
+        )));
+    };
+    let mut block = SadMap::new();
+    block.insert("d".into(), SadValue::String(String::new()));
+    for (k, v) in given {
+        if k != "d" {
+            block.insert(k.clone(), v.clone());
+        }
+    }
+    fill_section(SadValue::Object(block))
 }
 
 /// The disclosed state of an update: BLID, UUID, credential and state. The
@@ -414,21 +491,6 @@ fn saidify(mut sad: SadValue) -> Result<(String, Vec<u8>), CoreError> {
 fn cesr(code: &str, raw: &[u8], fs: usize) -> Result<String, CoreError> {
     encode_qb64(code, raw, fs)
         .map_err(|e| CoreError::ParseError(format!("cannot encode {code}: {e}")))
-}
-
-/// A sequence number as keripy's `Number` writes it: the smallest of Short
-/// (`M`, 2 bytes), Long (`0H`, 4), Tall (`R`, 5) and Big (`N`, 8) that holds it.
-fn number(n: u64) -> Result<String, CoreError> {
-    let bytes = n.to_be_bytes();
-    if n <= 0xffff {
-        cesr("M", &bytes[6..], 4)
-    } else if n <= 0xffff_ffff {
-        cesr("0H", &bytes[4..], 8)
-    } else if n <= 0xff_ffff_ffff {
-        cesr("R", &bytes[3..], 8)
-    } else {
-        cesr("N", &bytes, 12)
-    }
 }
 
 #[cfg(test)]

@@ -15,6 +15,7 @@ use affinidi_keri_core::parser::{self, Attachment};
 use affinidi_keri_core::registry::write::{
     BlindingUuid, RegistryNonce, RegistryState, TransactionState,
 };
+use affinidi_keri_core::registry::{IssuerLog, RegistryError};
 use affinidi_keri_core::sad::SadValue;
 use serde_json::json;
 
@@ -29,7 +30,7 @@ fn stamp(i: u64) -> String {
 fn the_writer_reproduces_keripys_reissued_registry() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/keripy-v2-registries/v2-reissued.cesr");
-    let messages = parser::parse_all(&std::fs::read(path).unwrap()).unwrap();
+    let messages = parser::parse_all(&std::fs::read(&path).unwrap()).unwrap();
     let acdc: Vec<_> = messages
         .iter()
         .filter(|m| {
@@ -97,4 +98,26 @@ fn the_writer_reproduces_keripys_reissued_registry() {
         assert_eq!(bup.said, said(i), "bup at {i}");
         state = next;
     }
+
+    // The same state is read back from the published stream, so a writer
+    // needs no registry store of its own.
+    let log = IssuerLog::replay(&messages, ISSUER).unwrap();
+    assert_eq!(
+        RegistryState::resume(&messages, &log, &rip.said).unwrap(),
+        state,
+        "resume from keripy's stream"
+    );
+
+    // A stream that leaves out the last update the KEL anchors cannot be
+    // continued from: the next update would name the wrong prior.
+    let last = said(4);
+    let withheld: Vec<_> = parser::parse_all(&std::fs::read(&path).unwrap())
+        .unwrap()
+        .into_iter()
+        .filter(|m| m.serder.sad()["d"].as_str() != Some(last.as_str()))
+        .collect();
+    assert!(matches!(
+        RegistryState::resume(&withheld, &log, &rip.said),
+        Err(RegistryError::MissingAnchoredEvent { .. })
+    ));
 }

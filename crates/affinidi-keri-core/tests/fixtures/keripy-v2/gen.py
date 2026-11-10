@@ -27,7 +27,8 @@ import sys
 
 import keri
 from keri import Kinds, Vrsn_1_0, Vrsn_2_0
-from keri.core import Counter, DigDex, Diger, Kevery, Parser, Salter, incept, interact, messagize, rotate
+from keri.core import Counter, DigDex, Diger, Kevery, Number, Parser, Prefixer, Salter, incept, interact, messagize, reply, rotate
+from keri.core import routing
 import contextlib
 import itertools
 
@@ -214,6 +215,51 @@ def downgrade(outdir):
              note="v2 icp then a v1 ixn: P2 refuses a version decrease; keripy's own result is recorded")
 
 
+def endorsed(outdir):
+    """Replies endorsed by a transferable AID after a rotation: a transferable
+    indexed signature group (`-X`) naming the establishment event at sn 1, its
+    sequence number a 2.x `Number`. keripy must accept both replies."""
+    s = keys(3, "endorsed")
+    icp = incept(code=DigDex.Blake3_256, keys=[s[0].verfer.qb64], ndigs=[ndig(s[1])], pvrsn=Vrsn_2_0, kind=KIND)
+    pre = icp.pre
+    rot = rotate(pre=pre, keys=[s[1].verfer.qb64], dig=icp.said, ndigs=[ndig(s[2])], sn=1, pvrsn=Vrsn_2_0, kind=KIND)
+    msgs = [msg(icp, [(s[0], 0, None)]), msg(rot, [(s[1], 0, None)])]
+    db, kvy = process(msgs)
+    kel = publish(db, pre, Vrsn_2_0)
+
+    stamp = "2026-01-01T00:00:00.000000+00:00"
+    replies = [
+        reply(pre=pre, route="/end/role/add", data=dict(cid=pre, role="controller", eid=pre),
+              stamp=stamp, pvrsn=Vrsn_2_0, kind=KIND),
+        reply(pre=pre, route="/loc/scheme", data=dict(eid=pre, scheme="https", url="https://example.com/"),
+              stamp=stamp, pvrsn=Vrsn_2_0, kind=KIND),
+    ]
+    out = bytearray(kel)
+    for r in replies:
+        tsg = (Prefixer(qb64=pre), Number(num=1), Diger(qb64=rot.said), [s[1].sign(r.raw, index=0)])
+        out.extend(messagize(r, tsgs=[tsg], gvrsn=Vrsn_2_0))
+    published = bytes(out)
+
+    db2 = _OPEN.enter_context(openDB(name=f"fixture{next(_DBS)}", temp=True))
+    rvy = routing.Revery(db=db2)
+    kvy2 = Kevery(db=db2, lax=False, local=False, rvy=rvy)
+    kvy2.registerReplyRoutes(router=rvy.rtr)
+    Parser(version=Vrsn_2_0).parse(ims=bytearray(published), kvy=kvy2, rvy=rvy)
+    ends = [list(k) for k, v in db2.ends.getTopItemIter() if v.allowed]
+    locs = [[k[0], k[1], v.url] for k, v in db2.locs.getTopItemIter()]
+    if ends != [[pre, "controller", pre]] or locs != [[pre, "https", "https://example.com/"]]:
+        raise SystemExit(f"v2-endorsed-replies: keripy did not accept its replies: {ends} {locs}")
+
+    with open(os.path.join(outdir, "v2-endorsed-replies.cesr"), "wb") as f:
+        f.write(published)
+    with open(os.path.join(outdir, "v2-endorsed-replies.json"), "w") as f:
+        json.dump({"note": "two rpy messages endorsed under the key state of the rotation at sn 1",
+                   "expect": "accept", "keripy": state(kvy2.kevers[pre]),
+                   "ends": ends, "locs": locs}, f, indent=2)
+        f.write("\n")
+    print(f"{'v2-endorsed-replies':32} {len(published):6} bytes  keripy accepted {len(ends)} end, {len(locs)} loc")
+
+
 def main(outdir):
     commit = subprocess.run(["git", "-C", os.path.dirname(keri.__file__), "rev-parse", "--short", "HEAD"],
                             capture_output=True, text=True).stdout.strip()
@@ -224,6 +270,7 @@ def main(outdir):
     weighted(outdir)
     migrated(outdir)
     downgrade(outdir)
+    endorsed(outdir)
     with open(os.path.join(outdir, "KERIPY_VERSION"), "w") as f:
         f.write(f"keripy {keri.__version__} {commit}\n")
 

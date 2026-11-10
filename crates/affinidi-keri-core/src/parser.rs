@@ -753,6 +753,51 @@ fn parse_receipt_couple(data: &[u8]) -> Result<(ReceiptCouple, usize), CoreError
     Ok(((prefix_qb64, sig_matter.raw().to_vec()), a + b))
 }
 
+/// The value of a sequence number as an attachment carries it: a 1.x
+/// `Seqner` (`0A`, 16 bytes) or a 2.x `Number` (`M`, `0H`, `R`, `N`).
+///
+/// A transferable signature group names its establishment event by sequence
+/// number and SAID; a verifier must check both, as keripy does, or a group
+/// naming the wrong sequence number verifies here and nowhere else.
+///
+/// # Errors
+/// Returns [`CoreError::ParseError`] for any other code, a malformed
+/// primitive, or a value that does not fit 64 bits.
+pub fn number_value(qb64: &str) -> Result<u64, CoreError> {
+    let (hs, fs, raw_len) = match qb64.get(..2) {
+        Some("0A") => (2, 24, 16),
+        Some("0H") => (2, 8, 4),
+        _ => match qb64.get(..1) {
+            Some("M") => (1, 4, 2),
+            Some("R") => (1, 8, 5),
+            Some("N") => (1, 12, 8),
+            _ => {
+                return Err(CoreError::ParseError(format!(
+                    "{qb64:?} is not a sequence number"
+                )));
+            }
+        },
+    };
+    if qb64.len() != fs {
+        return Err(CoreError::ParseError(format!(
+            "sequence number {qb64:?} is not {fs} characters"
+        )));
+    }
+    // The code stands in for leading zero bits: decode with it zeroed, and
+    // keep the trailing raw bytes.
+    let text = format!("{}{}", "A".repeat(hs), &qb64[hs..]);
+    let bytes = affinidi_cesr::codec::b64_decode(&text)
+        .map_err(|e| CoreError::ParseError(format!("sequence number {qb64:?}: {e}")))?;
+    let raw = &bytes[bytes.len() - raw_len..];
+    let (high, low) = raw.split_at(raw.len().saturating_sub(8));
+    if high.iter().any(|b| *b != 0) || bytes[..bytes.len() - raw_len].iter().any(|b| *b != 0) {
+        return Err(CoreError::ParseError(format!(
+            "sequence number {qb64:?} does not fit 64 bits"
+        )));
+    }
+    Ok(low.iter().fold(0u64, |n, b| (n << 8) | u64::from(*b)))
+}
+
 /// Full sizes of fixed-size Matter codes `affinidi-cesr` 0.1.3 does not know
 /// but KERI attachments carry: keripy's Number codes (`coring.py`, `NumDex`),
 /// which a 2.x first-seen replay couple uses for its ordinal (`MAAA`).

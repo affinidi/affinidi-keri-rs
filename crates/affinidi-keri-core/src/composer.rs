@@ -116,6 +116,81 @@ pub fn compose_event(serder: &Serder, sigs: &[Siger]) -> Result<Vec<u8>, CoreErr
     frame(serder, &groups)
 }
 
+/// Compose a message endorsed by a transferable identifier: the body and one
+/// transferable indexed signature group (`-F` in 1.x, `-X` in 2.x), naming
+/// the establishment event whose key state made the signatures.
+///
+/// This is how a `rpy` (an endpoint role or location) or a 1.x ACDC is signed
+/// by an AID. The group holds `prefix`, the establishment event's sequence
+/// number `sn` and SAID `establishment`, then `sigs` as a controller
+/// signature group. The sequence number is written as each genus writes it:
+/// a 1.x `Seqner` (`0A`, 16 bytes), or a 2.x `Number` in the smallest code
+/// that holds it (keripy `messagize` with `tsgs`).
+///
+/// # Errors
+/// Returns `CoreError` if `sigs` is empty or a primitive cannot be encoded.
+pub fn compose_endorsed(
+    serder: &Serder,
+    prefix: &str,
+    sn: u64,
+    establishment: &str,
+    sigs: &[Siger],
+) -> Result<Vec<u8>, CoreError> {
+    if sigs.is_empty() {
+        return Err(CoreError::Validation(
+            "an endorsement needs at least one signature".into(),
+        ));
+    }
+    let table = table_for(serder);
+    let items = sigs
+        .iter()
+        .map(|s| s.qb64().map_err(CoreError::Crypto))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut group = Vec::new();
+    group.extend_from_slice(prefix.as_bytes());
+    group.extend_from_slice(sequence_number(table, sn)?.as_bytes());
+    group.extend_from_slice(establishment.as_bytes());
+    push_group(&mut group, table, GroupKind::ControllerIdxSigs, &items)?;
+    let group = String::from_utf8(group)
+        .map_err(|_| CoreError::ParseError("an endorsement is not ASCII".into()))?;
+
+    let mut groups = Vec::new();
+    push_group(&mut groups, table, GroupKind::TransIdxSigGroups, &[group])?;
+    frame(serder, &groups)
+}
+
+/// A sequence number as an attachment carries it in `table`'s genus.
+pub(crate) fn sequence_number(table: CounterTable, sn: u64) -> Result<String, CoreError> {
+    match table {
+        CounterTable::V1 => {
+            let mut raw = [0u8; 16];
+            raw[8..].copy_from_slice(&sn.to_be_bytes());
+            cesr("0A", &raw, 24)
+        }
+        _ => number(sn),
+    }
+}
+
+/// A number as keripy's `Number` writes it: the smallest of Short (`M`, 2
+/// bytes), Long (`0H`, 4), Tall (`R`, 5) and Big (`N`, 8) that holds it.
+pub(crate) fn number(n: u64) -> Result<String, CoreError> {
+    let bytes = n.to_be_bytes();
+    if n <= 0xffff {
+        cesr("M", &bytes[6..], 4)
+    } else if n <= 0xffff_ffff {
+        cesr("0H", &bytes[4..], 8)
+    } else if n <= 0xff_ffff_ffff {
+        cesr("R", &bytes[3..], 8)
+    } else {
+        cesr("N", &bytes, 12)
+    }
+}
+
+fn cesr(code: &str, raw: &[u8], fs: usize) -> Result<String, CoreError> {
+    affinidi_cesr::codec::encode_qb64(code, raw, fs)
+        .map_err(|e| CoreError::ParseError(format!("cannot encode {code}: {e}")))
+}
+
 /// Compose a non-transferable receipt message.
 ///
 /// The event followed by one non-transferable receipt couple (prefix and
@@ -165,6 +240,47 @@ mod tests {
     use crate::said;
     use crate::version::SerializationKind;
     use affinidi_keri_crypto::{Diger, Signer};
+
+    #[test]
+    fn sequence_numbers_read_back() {
+        use crate::parser::number_value;
+        for n in [
+            0u64,
+            1,
+            0xff,
+            0xffff,
+            0x1_0000,
+            0xffff_ffff,
+            0x1_0000_0000,
+            u64::MAX,
+        ] {
+            for table in [CounterTable::V1, CounterTable::V2] {
+                let qb64 = sequence_number(table, n).unwrap();
+                assert_eq!(number_value(&qb64).unwrap(), n, "{qb64}");
+            }
+        }
+        assert_eq!(number_value("MAAB").unwrap(), 1);
+        assert!(number_value("EAAB").is_err());
+        assert!(number_value("MAA").is_err());
+    }
+
+    #[test]
+    fn a_version_1_endorsement_is_an_f_group_with_a_seqner() {
+        let serder = make_test_serder();
+        let signer = Signer::new("A", [42u8; 32].to_vec()).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let prefix = serder.prefix().unwrap();
+        let said = serder.said().unwrap();
+        let out = compose_endorsed(&serder, &prefix, 3, &said, std::slice::from_ref(&sig)).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let attachments = &text[serder.size()..];
+        let expected = format!(
+            "-FAB{prefix}0AAAAAAAAAAAAAAAAAAAAAAD{said}-AAB{}",
+            sig.qb64().unwrap()
+        );
+        assert_eq!(attachments, expected);
+        assert!(compose_endorsed(&serder, &prefix, 3, &said, &[]).is_err());
+    }
 
     fn make_test_serder() -> Serder {
         let signer = Signer::new("A", [42u8; 32].to_vec()).unwrap();

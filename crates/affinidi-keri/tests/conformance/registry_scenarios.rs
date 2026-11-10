@@ -131,11 +131,26 @@ struct Registry {
 
 impl Registry {
     fn new(issuer: &Issuer, nonce: &[u8; 16], schema: &'static str, attributes: Value) -> Self {
+        Self::with_rules(issuer, nonce, schema, attributes, None)
+    }
+
+    fn with_rules(
+        issuer: &Issuer,
+        nonce: &[u8; 16],
+        schema: &'static str,
+        attributes: Value,
+        rules: Option<Value>,
+    ) -> Self {
         let (state, rip) =
             RegistryState::incept(&issuer.prefix(), &RegistryNonce(*nonce), &stamp(1)).unwrap();
-        let credential = state
-            .designation(schema, &SadValue::from_json_value(&attributes))
-            .unwrap();
+        let attributes = SadValue::from_json_value(&attributes);
+        let credential = match rules {
+            None => state.designation(schema, &attributes),
+            Some(r) => {
+                state.designation_with_rules(schema, &attributes, &SadValue::from_json_value(&r))
+            }
+        }
+        .unwrap();
         Self {
             schema,
             state,
@@ -283,6 +298,39 @@ fn two_designations() -> Scenario {
     )
 }
 
+/// A designation with the rules section its schema requires (`r`), as
+/// `did:webs` writes one: the credential's SAID covers both sections compact.
+fn with_rules() -> Scenario {
+    let name = "v2-designation-with-rules";
+    let mut issuer = Issuer::new(name, ProtocolVersion::V2);
+    let attrs = aliases(&issuer);
+    let rules = json!({
+        "aliasDesignation": {
+            "l": "The issuer of this ACDC designates the identifiers in the ids field as the only allowed namespaced aliases of the issuer's AID."
+        },
+        "usageDisclaimer": {
+            "l": "This attestation only asserts designated aliases of the controller of the AID, that the AID controlled namespaced alias has been designated by the controller. It does not assert that the controller of this AID has control over the infrastructure or anything else related to the namespace other than the included AID."
+        },
+        "issuanceDisclaimer": {
+            "l": "All information in a valid and non-revoked alias designation assertion is accurate as of the date specified."
+        },
+        "termsOfUse": {
+            "l": "Designated aliases of the AID must only be used in a manner consistent with the expressed intent of the AID controller."
+        }
+    });
+    let mut reg =
+        Registry::with_rules(&issuer, b"vti-registry-001", ALIASES_V2, attrs, Some(rules));
+    let anchor = issuer.anchor(&[reg.rip.0.seal()]);
+    reg.rip.1 = Some(anchor);
+    updated(&mut issuer, &mut reg, name, &[TransactionState::Issued]);
+    scenario(
+        name,
+        "a designation with the rules section (r) its schema requires; its SAID covers the attribute block and rules compact",
+        &issuer,
+        &[&reg],
+    )
+}
+
 /// A KEL that began in KERI v1 and continues in v2, issuing from a v2
 /// registry once it is v2.
 fn migrated() -> Scenario {
@@ -321,6 +369,7 @@ pub fn all() -> Vec<Scenario> {
             &[Issued, Revoked, Issued],
         ),
         two_designations(),
+        with_rules(),
         migrated(),
     ]
 }

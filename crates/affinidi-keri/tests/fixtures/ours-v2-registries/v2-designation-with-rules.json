@@ -1,0 +1,41 @@
+{
+  "credentials": [
+    {
+      "acm": {
+        "raw": "{\"v\":\"ACDCCAACAAJSONAATh.\",\"t\":\"acm\",\"d\":\"EM8bsEQgFd9eVNKGaSeDuXusFQDgdqAKH_wTKYZgef5c\",\"i\":\"ELVLMQhdKzGZBJs0lpYDbXq2nERL9Dzn3g2EjFufRlBm\",\"rd\":\"EBYazeDRiTaaHjZbQdte97TYWAmUTmtA0tcWTmEDBILN\",\"s\":\"EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA\",\"a\":{\"d\":\"EEHNShMbqnBZ4dOup57REfDXtNuNCt5yYIXzipvHBgdY\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\",\"ids\":[\"did:webs:example.com:ELVLMQhdKzGZBJs0lpYDbXq2nERL9Dzn3g2EjFufRlBm\"]},\"r\":{\"d\":\"EPIW-sde4vrlkOowNhEANEr5pzpAdM5BG3j3B0_bOIXA\",\"aliasDesignation\":{\"l\":\"The issuer of this ACDC designates the identifiers in the ids field as the only allowed namespaced aliases of the issuer's AID.\"},\"issuanceDisclaimer\":{\"l\":\"All information in a valid and non-revoked alias designation assertion is accurate as of the date specified.\"},\"termsOfUse\":{\"l\":\"Designated aliases of the AID must only be used in a manner consistent with the expressed intent of the AID controller.\"},\"usageDisclaimer\":{\"l\":\"This attestation only asserts designated aliases of the controller of the AID, that the AID controlled namespaced alias has been designated by the controller. It does not assert that the controller of this AID has control over the infrastructure or anything else related to the namespace other than the included AID.\"}}}"
+      },
+      "credential": "EM8bsEQgFd9eVNKGaSeDuXusFQDgdqAKH_wTKYZgef5c",
+      "expect": "issued",
+      "registry": "EBYazeDRiTaaHjZbQdte97TYWAmUTmtA0tcWTmEDBILN",
+      "rip": {
+        "anchor": {
+          "said": "EBV2KUGAu72R12NXQKjlAwr0vRJz3IQ1F8v308a1cqUw",
+          "sn": 1
+        },
+        "raw": "{\"v\":\"ACDCCAACAAJSONAADa.\",\"t\":\"rip\",\"d\":\"EBYazeDRiTaaHjZbQdte97TYWAmUTmtA0tcWTmEDBILN\",\"u\":\"0AB2dGktcmVnaXN0cnktMDAx\",\"i\":\"ELVLMQhdKzGZBJs0lpYDbXq2nERL9Dzn3g2EjFufRlBm\",\"n\":\"0\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\"}"
+      },
+      "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+      "updates": [
+        {
+          "anchor": {
+            "said": "ENivjSpOB2ySJmtQO8fEoqz1Kq2Uca597Qcur3Ce-Xwc",
+            "sn": 2
+          },
+          "disclosure": {
+            "acdc": "EM8bsEQgFd9eVNKGaSeDuXusFQDgdqAKH_wTKYZgef5c",
+            "blid": "EMP7LO74DowB_ZQ7IDv2nyFS1wESAGuWfkc_kljKrNx_",
+            "state": "issued",
+            "uuid": "aNhyE8lHRvfPv9fdab3XAhjmnJ72wRqUxdY_m3ttfoqZ"
+          },
+          "raw": "{\"v\":\"ACDCCAACAAJSONAAEi.\",\"t\":\"bup\",\"d\":\"EIkynyAg07E7rEJqou8VD-v21c0UoCWMSCojNQI1WU6P\",\"rd\":\"EBYazeDRiTaaHjZbQdte97TYWAmUTmtA0tcWTmEDBILN\",\"n\":\"1\",\"p\":\"EBYazeDRiTaaHjZbQdte97TYWAmUTmtA0tcWTmEDBILN\",\"dt\":\"2026-02-02T00:00:00.000000+00:00\",\"b\":\"EMP7LO74DowB_ZQ7IDv2nyFS1wESAGuWfkc_kljKrNx_\"}"
+        }
+      ]
+    }
+  ],
+  "kel": {
+    "prefix": "ELVLMQhdKzGZBJs0lpYDbXq2nERL9Dzn3g2EjFufRlBm",
+    "said": "ENivjSpOB2ySJmtQO8fEoqz1Kq2Uca597Qcur3Ce-Xwc",
+    "sn": 2
+  },
+  "note": "a designation with the rules section (r) its schema requires; its SAID covers the attribute block and rules compact"
+}
