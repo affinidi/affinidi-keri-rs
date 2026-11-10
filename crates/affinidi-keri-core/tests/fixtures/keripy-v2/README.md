@@ -41,6 +41,13 @@ moving to a newer keripy commit is a behaviour change to review.
   `n = [H(A), H(B)]`: keripy signs B and A with `2A` (both lists, ondex 1 and
   0) and the uncommitted X current-only (`B`). The prior `nt` is met by the
   committed positions the signatures expose, not by the key list's shape.
+- **A rotation supersedes interaction events after the last establishment
+  event, and nothing else** (keripy's rules A0–A2). In
+  `v2-superseding-recovery.cesr` the recovery key K rotates at sn 2 after
+  ixn 1; keripy publishes the superseded ixn 2 too, before the rotation, so a
+  reader must reconcile them. `v2-rotation-cannot-supersede-rotation` and
+  `v2-stale-recovery` are refused. A superseding delegated rotation (rule B)
+  is not supported yet.
 - **A 2.x endorsement writes its sequence number as a `Number`.** In
   `v2-endorsed-replies.cesr` the `-X` group names the establishment event at
   sn 1 as `MAAB` (the smallest `Number` code), where 1.x writes a 24-character

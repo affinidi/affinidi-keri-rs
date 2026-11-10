@@ -1,0 +1,28 @@
+{
+  "note": "two rotations at sn 1: the second supersedes nothing (rule A1)",
+  "expect": "refuse-event-2",
+  "keripy": {
+    "prefix": "EKFj-M-z-k_CwXypO3k1c29Aw5znj74T3WB-xES30XGv",
+    "sn": 1,
+    "said": "EG4CJZTDKNRKOmql5oeErpYCALKiM4CHebrgILhGv-Jd",
+    "ilk": "rot",
+    "version": "2.0",
+    "keys": [
+      "DHPDltwW3e0ADGyKvD33S5eKZthIrNMUJMh7vpR9dksJ",
+      "DLkzSRYltEizh6TiqXwaIKybYq6dqEN6a-JnMdAZqi5M"
+    ],
+    "kt": "1",
+    "n": [
+      "EB1RDT9xsbtavI7ETA8S3MxHNnlw5cw29octdm1y437W",
+      "EEOYh-2dSkDtWUsP3cVq02r_8pp-aFOaoR2je3Go9phG"
+    ],
+    "nt": [
+      "1/2",
+      "1"
+    ],
+    "establishment": {
+      "sn": 1,
+      "said": "EG4CJZTDKNRKOmql5oeErpYCALKiM4CHebrgILhGv-Jd"
+    }
+  }
+}

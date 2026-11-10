@@ -25,6 +25,12 @@ use crate::version::SerializationKind;
 pub struct Kever {
     /// The current verified key state.
     state: KeyState,
+    /// The state the last establishment event installed, from which a
+    /// superseding rotation recovers.
+    est: KeyState,
+    /// The interaction events after it, in order: each one's SAID and
+    /// protocol version.
+    since: Vec<(String, u8)>,
     /// Whether the kever has been fully initialized with an inception event.
     pub incepted: bool,
 }
@@ -90,6 +96,8 @@ impl Kever {
         let state = KeyState::from_inception(&icp)?;
 
         Ok(Self {
+            est: state.clone(),
+            since: Vec::new(),
             state,
             incepted: true,
         })
@@ -164,6 +172,8 @@ impl Kever {
         let state = KeyState::from_delegated_inception(&dip)?;
 
         Ok(Self {
+            est: state.clone(),
+            since: Vec::new(),
             state,
             incepted: true,
         })
@@ -221,6 +231,8 @@ impl Kever {
         let state = KeyState::from_inception(&icp)?;
 
         Ok(Self {
+            est: state.clone(),
+            since: Vec::new(),
             state,
             incepted: true,
         })
@@ -228,72 +240,19 @@ impl Kever {
 
     /// Process the next event in the KEL.
     ///
-    /// Handles rotation and interaction events. Validates that:
-    /// - The sequence number is exactly current_sn + 1
-    /// - The prior SAID matches the last event digest
+    /// Handles rotation and interaction events, and a rotation that
+    /// supersedes interaction events (see [`Kever::verify_update`]).
+    /// Validates that:
+    /// - The sequence number is exactly current_sn + 1, or, for a superseding
+    ///   rotation, after the last establishment event
+    /// - The prior SAID matches the digest of the event before it
     /// - Signatures satisfy the current signing threshold
     ///
     /// # Errors
     /// Returns `CoreError` if the event is invalid or out of order.
     pub fn update(&mut self, serder: &Serder, sigs: &[Siger]) -> Result<(), CoreError> {
-        if !self.incepted {
-            return Err(CoreError::Validation(
-                "kever not initialized with inception event".into(),
-            ));
-        }
-
-        // Verify SAID integrity before trusting any event fields
-        serder.verify_said("E")?;
-
-        let ilk = serder.ilk()?;
-        let sn = serder.sn()?;
-
-        // Sequence number must be exactly current + 1
-        if sn != self.state.sn + 1 {
-            return Err(CoreError::OutOfOrder {
-                expected: self.state.sn + 1,
-                got: sn,
-            });
-        }
-
-        match ilk.as_str() {
-            "rot" => {
-                self.reject_plain_rotation_when_delegated()?;
-                check_shape(serder.sad(), "rot")?;
-                let rot: RotationEvent =
-                    serder.sad().deserialize_into().map_err(CoreError::Json)?;
-                // A rotation is signed by the keys it INSTALLS, not the ones it
-                // replaces: authority comes from the prior event's pre-rotation
-                // commitment, proven by those keys signing here. Verifying
-                // against the outgoing key set instead both accepts events
-                // keripy rejects and rejects the ones it produces.
-                self.verify_rotation_sigs(serder.raw(), sigs, &rot.keys, &rot.keys_threshold.0)?;
-                self.state = self.state.apply_rotation(&rot)?;
-            }
-            "ixn" => {
-                // An interaction changes no keys, so it is signed by the
-                // current key set under the current threshold.
-                let verfers = self.build_verfers()?;
-                Self::verify_sigs_static(serder.raw(), sigs, &verfers, &self.state.threshold)?;
-                check_shape(serder.sad(), "ixn")?;
-                let ixn: InteractionEvent =
-                    serder.sad().deserialize_into().map_err(CoreError::Json)?;
-                self.state = self.state.apply_interaction(&ixn)?;
-            }
-            "drt" => {
-                return Err(CoreError::UnexpectedIlk(
-                    "'drt' is a delegated rotation; use Kever::verify_update_delegated, \
-                     which verifies the delegator's anchoring seal"
-                        .into(),
-                ));
-            }
-            _ => {
-                return Err(CoreError::UnexpectedIlk(format!(
-                    "expected 'rot' or 'ixn' for update, got '{ilk}'"
-                )));
-            }
-        }
-
+        let new_state = self.verify_update(serder, sigs)?;
+        self.apply_verified_update(new_state);
         Ok(())
     }
 
@@ -316,6 +275,9 @@ impl Kever {
         let ilk = serder.ilk()?;
         let sn = serder.sn()?;
 
+        if ilk == "rot" && sn <= self.state.sn {
+            return self.recovery_base(sn)?.verify_update(serder, sigs);
+        }
         if sn != self.state.sn + 1 {
             return Err(CoreError::OutOfOrder {
                 expected: self.state.sn + 1,
@@ -390,6 +352,9 @@ impl Kever {
         let sn = u64::from_str_radix(sn_str, 16)
             .map_err(|_| CoreError::Validation(format!("invalid sn: {sn_str}")))?;
 
+        if ilk == "rot" && sn <= self.state.sn {
+            return self.recovery_base(sn)?.verify_update_owned(raw, sad, sigs);
+        }
         if sn != self.state.sn + 1 {
             return Err(CoreError::OutOfOrder {
                 expected: self.state.sn + 1,
@@ -468,6 +433,12 @@ impl Kever {
         }
 
         let sn = serder.sn()?;
+        if sn <= self.state.sn {
+            return Err(CoreError::Unsupported(format!(
+                "a delegated rotation at sn {sn} would supersede the event there: \
+                 superseding delegated rotations (KERI recovery rule B) are not supported"
+            )));
+        }
         if sn != self.state.sn + 1 {
             return Err(CoreError::OutOfOrder {
                 expected: self.state.sn + 1,
@@ -487,8 +458,62 @@ impl Kever {
     }
 
     /// Apply a previously verified update (from [`verify_update`]).
+    ///
+    /// After a superseding rotation the state's sequence number goes back:
+    /// the superseded interaction events are no longer part of the log.
     pub fn apply_verified_update(&mut self, new_state: KeyState) {
+        if new_state.said == new_state.last_event_digest {
+            // An establishment event: recovery starts from here.
+            self.est = new_state.clone();
+            self.since.clear();
+        } else {
+            self.since.push((
+                new_state.last_event_digest.clone(),
+                new_state.protocol_major,
+            ));
+        }
         self.state = new_state;
+    }
+
+    /// The state to verify a superseding rotation at `sn` against: the log as
+    /// it stood at `sn - 1`.
+    ///
+    /// KERI's recovery rules for a non-delegated rotation (keripy
+    /// `Kever.update` and its superseding rules A0–A2, b70986f): a rotation
+    /// may supersede interaction events after the last establishment event,
+    /// and nothing else. So `sn` must be after the last establishment event
+    /// and at or before the latest event, which is then an interaction event.
+    /// Interaction events change no keys, so the state at `sn - 1` is the last
+    /// establishment event's, at that event's sequence number and SAID; the
+    /// rotation is then verified exactly as the next event of that log — its
+    /// prior, its signatures against the pre-rotation commitment — and on
+    /// acceptance the events it supersedes are gone. This is how a recovery
+    /// key holder takes back an identifier whose routine key signed events it
+    /// should not have.
+    fn recovery_base(&self, sn: u64) -> Result<Kever, CoreError> {
+        if sn <= self.est.sn {
+            return Err(CoreError::Validation(format!(
+                "stale rotation at sn {sn}: the last establishment event is at sn {}, and a \
+                 rotation supersedes only interaction events after it",
+                self.est.sn
+            )));
+        }
+        // est.sn < sn <= state.sn, so every event in (est.sn, state.sn] is an
+        // interaction event, recorded in `since`.
+        let kept = usize::try_from(sn - 1 - self.est.sn)
+            .map_err(|_| CoreError::Validation("sequence number out of range".into()))?;
+        let mut base = self.est.clone();
+        base.sn = sn - 1;
+        if let Some((said, major)) = kept.checked_sub(1).and_then(|i| self.since.get(i)) {
+            base.last_event_digest = said.clone();
+            base.protocol_major = *major;
+        }
+        Ok(Kever {
+            state: base,
+            est: self.est.clone(),
+            since: self.since[..kept].to_vec(),
+            incepted: true,
+        })
     }
 
     /// Verify signatures over a message using the current key set.

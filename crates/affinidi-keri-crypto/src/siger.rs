@@ -180,6 +180,7 @@ mod tests {
         // Current only: no ondex.
         let siger = Siger::new("B", 1, None, raw.clone()).unwrap();
         assert_eq!(siger.ondex(), None);
-        assert!(Siger::new("B", 1, Some(2), raw).is_err());
+        // An ondex given for a current-only code is dropped.
+        assert_eq!(Siger::new("B", 1, Some(2), raw).unwrap().ondex(), None);
     }
 }
