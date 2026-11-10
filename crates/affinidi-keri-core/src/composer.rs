@@ -3,7 +3,6 @@
 //! The Composer constructs serialized KERI events with CESR-encoded
 //! signature attachments appended after the message body.
 
-use affinidi_cesr::Counter;
 use affinidi_keri_crypto::{Cigar, Siger};
 
 use crate::counter_table::{CounterTable, GroupKind};
@@ -35,69 +34,105 @@ pub fn counter_code_for(serder: &Serder, kind: GroupKind) -> Result<&'static str
         .ok_or_else(|| CoreError::ParseError(format!("{kind:?} has no counter code in {table:?}")))
 }
 
+/// Append `items` as one counted group of `kind`, in `table`'s code and unit.
+fn push_group(
+    out: &mut Vec<u8>,
+    table: CounterTable,
+    kind: GroupKind,
+    items: &[String],
+) -> Result<(), CoreError> {
+    let body: String = items.concat();
+    let count = if table.counts_quadlets(kind) {
+        if !body.len().is_multiple_of(4) {
+            return Err(CoreError::ParseError(format!(
+                "{kind:?} material of {} characters is not whole quadlets",
+                body.len()
+            )));
+        }
+        body.len() / 4
+    } else {
+        items.len()
+    };
+    out.extend_from_slice(kind.counter(table, count)?.as_bytes());
+    out.extend_from_slice(body.as_bytes());
+    Ok(())
+}
+
+/// Frame a message body and its attachment groups the way keripy publishes
+/// one in its version's genus.
+///
+/// A version 1 event is the body followed by its groups, unchanged from what
+/// this crate has always written. A version 2 event opens with the 2.x
+/// genus-version counter, so the message declares its own genus wherever it
+/// lands in a stream (a stream with none is read as 1.x, P1), and its groups
+/// are wrapped in an attachment group, as keripy's `clonePreIter` writes them.
+fn frame(serder: &Serder, groups: &[u8]) -> Result<Vec<u8>, CoreError> {
+    let table = table_for(serder);
+    let mut out = Vec::with_capacity(serder.size() + groups.len() + 16);
+    match table {
+        CounterTable::V1 => {
+            out.extend_from_slice(serder.raw());
+            out.extend_from_slice(groups);
+        }
+        _ => {
+            out.extend_from_slice(table.genus_counter().as_bytes());
+            out.extend_from_slice(serder.raw());
+            if !groups.is_empty() {
+                let text = std::str::from_utf8(groups)
+                    .map_err(|_| CoreError::ParseError("attachments are not ASCII".into()))?;
+                push_group(
+                    &mut out,
+                    table,
+                    GroupKind::AttachedMaterialQuadlets,
+                    &[text.to_string()],
+                )?;
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Compose a signed event message.
 ///
-/// Concatenates the serialized event body with the controller-indexed-signature
-/// counter code for the event's protocol version, followed by each indexed
-/// signature in qb64 encoding.
+/// The event's controller indexed signatures, in the counter table its own
+/// version implies; a version 2 event is framed as [`frame`] describes.
 ///
 /// # Errors
 /// Returns `CoreError` if the counter or signatures cannot be encoded.
 pub fn compose_event(serder: &Serder, sigs: &[Siger]) -> Result<Vec<u8>, CoreError> {
-    let mut output = Vec::with_capacity(serder.size() + 4 + sigs.len() * 88);
-
-    // Message body
-    output.extend_from_slice(serder.raw());
-
+    let mut groups = Vec::new();
     if !sigs.is_empty() {
-        let code = counter_code_for(serder, GroupKind::ControllerIdxSigs)?;
-        let counter = Counter::new(code, sigs.len())
-            .map_err(|e| CoreError::ParseError(format!("failed to create counter: {e}")))?;
-        let counter_qb64 = counter
-            .qb64()
-            .map_err(|e| CoreError::ParseError(format!("failed to encode counter: {e}")))?;
-        output.extend_from_slice(counter_qb64.as_bytes());
-
-        // Each indexed signature
-        for sig in sigs {
-            let sig_qb64 = sig.qb64().map_err(CoreError::Crypto)?;
-            output.extend_from_slice(sig_qb64.as_bytes());
-        }
+        let items = sigs
+            .iter()
+            .map(|s| s.qb64().map_err(CoreError::Crypto))
+            .collect::<Result<Vec<_>, _>>()?;
+        push_group(
+            &mut groups,
+            table_for(serder),
+            GroupKind::ControllerIdxSigs,
+            &items,
+        )?;
     }
-
-    Ok(output)
+    frame(serder, &groups)
 }
 
 /// Compose a non-transferable receipt message.
 ///
-/// Concatenates the serialized event body with the non-transferable receipt
-/// couple counter code for the event's protocol version, followed by the
-/// prefix qb64 and cigar (non-indexed signature) qb64.
+/// The event followed by one non-transferable receipt couple (prefix and
+/// cigar) in the counter table its own version implies.
 ///
 /// # Errors
 /// Returns `CoreError` if the counter or primitives cannot be encoded.
 pub fn compose_receipt(serder: &Serder, prefix: &str, cigar: &Cigar) -> Result<Vec<u8>, CoreError> {
-    let mut output = Vec::with_capacity(serder.size() + 4 + prefix.len() + 88);
-
-    // Message body
-    output.extend_from_slice(serder.raw());
-
-    let code = counter_code_for(serder, GroupKind::NonTransReceiptCouples)?;
-    let counter = Counter::new(code, 1)
-        .map_err(|e| CoreError::ParseError(format!("failed to create counter: {e}")))?;
-    let counter_qb64 = counter
-        .qb64()
-        .map_err(|e| CoreError::ParseError(format!("failed to encode counter: {e}")))?;
-    output.extend_from_slice(counter_qb64.as_bytes());
-
-    // Prefix qb64
-    output.extend_from_slice(prefix.as_bytes());
-
-    // Cigar qb64
     let cigar_qb64 = cigar.qb64().map_err(CoreError::Crypto)?;
-    output.extend_from_slice(cigar_qb64.as_bytes());
-
-    Ok(output)
+    let mut groups = Vec::new();
+    push_group(
+        &mut groups,
+        table_for(serder),
+        GroupKind::NonTransReceiptCouples,
+        &[format!("{prefix}{cigar_qb64}")],
+    )?;
+    frame(serder, &groups)
 }
 
 /// Compose a message with witness indexed signatures.
@@ -108,28 +143,20 @@ pub fn compose_receipt(serder: &Serder, prefix: &str, cigar: &Cigar) -> Result<V
 /// # Errors
 /// Returns `CoreError` if encoding fails.
 pub fn compose_witness_sigs(serder: &Serder, sigs: &[Siger]) -> Result<Vec<u8>, CoreError> {
-    let mut output = Vec::with_capacity(serder.size() + 4 + sigs.len() * 88);
-
-    // Message body
-    output.extend_from_slice(serder.raw());
-
+    let mut groups = Vec::new();
     if !sigs.is_empty() {
-        let code = counter_code_for(serder, GroupKind::WitnessIdxSigs)?;
-        let counter = Counter::new(code, sigs.len())
-            .map_err(|e| CoreError::ParseError(format!("failed to create counter: {e}")))?;
-        let counter_qb64 = counter
-            .qb64()
-            .map_err(|e| CoreError::ParseError(format!("failed to encode counter: {e}")))?;
-        output.extend_from_slice(counter_qb64.as_bytes());
-
-        // Each indexed signature
-        for sig in sigs {
-            let sig_qb64 = sig.qb64().map_err(CoreError::Crypto)?;
-            output.extend_from_slice(sig_qb64.as_bytes());
-        }
+        let items = sigs
+            .iter()
+            .map(|s| s.qb64().map_err(CoreError::Crypto))
+            .collect::<Result<Vec<_>, _>>()?;
+        push_group(
+            &mut groups,
+            table_for(serder),
+            GroupKind::WitnessIdxSigs,
+            &items,
+        )?;
     }
-
-    Ok(output)
+    frame(serder, &groups)
 }
 
 #[cfg(test)]
@@ -164,6 +191,41 @@ mod tests {
         });
         said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
         Serder::new(SerializationKind::Json, sad).unwrap()
+    }
+
+    #[test]
+    fn a_version_2_event_is_framed_as_keripy_frames_it() {
+        let signer = Signer::new("A", [42u8; 32].to_vec()).unwrap();
+        let verfer_qb64 = signer.verfer().qb64().unwrap();
+        let mut sad = crate::sad!({
+            "v": "KERICAACAAJSONAAAA.",
+            "t": "icp",
+            "d": "",
+            "i": "",
+            "s": "0",
+            "kt": "1",
+            "k": [verfer_qb64],
+            "nt": "0",
+            "n": [],
+            "bt": "0",
+            "b": [],
+            "c": [],
+            "a": []
+        });
+        said::compute_said(&mut sad, "d", "E", SerializationKind::Json).unwrap();
+        let serder = Serder::new(SerializationKind::Json, sad).unwrap();
+        let sig = signer.sign_indexed(serder.raw(), 0, true).unwrap();
+        let composed = compose_event(&serder, &[sig]).unwrap();
+
+        let text = std::str::from_utf8(&composed).unwrap();
+        assert!(text.starts_with("-_AAACAA{"), "genus counter first: {text}");
+        let tail = &text[8 + serder.size()..];
+        // -C wrapping 23 quadlets: -KAW (1) and one 88-character signature (22).
+        assert!(tail.starts_with("-CAX-KAW"), "{tail}");
+
+        let (parsed, consumed) = crate::parser::parse_next(&composed).unwrap();
+        assert_eq!(consumed, composed.len());
+        assert_eq!(parsed.controller_sigs().len(), 1);
     }
 
     #[test]
