@@ -86,4 +86,5 @@ Rules this writer keeps:
 | `v2-registry-revoked` | issued, then revoked | revoked |
 | `v2-registry-reissued` | issued, revoked, issued again, a fresh UUID each | issued |
 | `v2-two-designations` | designated aliases and a key agreement designation, each in its own registry; both inceptions in one `ixn`, both issuances in the next | issued, issued |
+| `v2-designation-with-rules` | designated aliases with the rules section `r` its schema requires; the credential's SAID covers both sections compact | issued |
 | `migrated-v1-kel-v2-registry` | a v1 `icp` and `ixn`, then v2 `ixn` events anchoring a v2 registry and its issuance | issued |
