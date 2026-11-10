@@ -88,7 +88,8 @@ impl Threshold {
     ///
     /// A simple threshold is a JSON string like `"1"` or `"2"`.
     /// A weighted threshold is a nested JSON array of fractional strings,
-    /// e.g. `[["1/2", "1/2", "1/2"]]`.
+    /// e.g. `[["1/2", "1/2", "1/2"]]`, or, for a single clause, a flat one,
+    /// `["1/2", "1/2", "1/2"]`.
     ///
     /// `"0"` parses. It is how an event commits to no next keys (`nt: "0"`
     /// with an empty `n`), which abandons the identifier: no event may
@@ -113,12 +114,26 @@ impl Threshold {
                 })?;
                 Ok(Threshold::Simple(n))
             }
-            serde_json::Value::Array(clauses) => {
-                if clauses.is_empty() {
+            serde_json::Value::Array(items) => {
+                if items.is_empty() {
                     return Err(CoreError::Validation(
                         "weighted threshold must have at least one clause".into(),
                     ));
                 }
+                // A single clause may be written flat, `["1/2", "1"]`, and
+                // that is how keripy writes one (its `Tholder` simplifies
+                // `[["1/2","1"]]` when it serializes): read it as the one
+                // clause it is. Weights and clauses cannot be mixed.
+                let flat = [serde_json::Value::Array(items.clone())];
+                let clauses: &[serde_json::Value] = if items.iter().all(|i| i.is_string()) {
+                    &flat
+                } else if items.iter().all(|i| i.is_array()) {
+                    items
+                } else {
+                    return Err(CoreError::Validation(
+                        "weighted threshold mixes weights and clauses".into(),
+                    ));
+                };
                 let mut weighted = Vec::new();
                 for clause in clauses {
                     let arr = clause.as_array().ok_or_else(|| {
@@ -312,6 +327,14 @@ impl From<usize> for ThresholdValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_single_clause_may_be_written_flat_as_keripy_writes_it() {
+        let flat = Threshold::from_json_value(&serde_json::json!(["1/2", "1"])).unwrap();
+        let nested = Threshold::from_json_value(&serde_json::json!([["1/2", "1"]])).unwrap();
+        assert_eq!(flat, nested);
+        assert!(Threshold::from_json_value(&serde_json::json!(["1/2", ["1"]])).is_err());
+    }
 
     #[test]
     fn test_simple_threshold_parse() {
