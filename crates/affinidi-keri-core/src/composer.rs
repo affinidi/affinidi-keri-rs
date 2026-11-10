@@ -242,6 +242,29 @@ mod tests {
     use affinidi_keri_crypto::{Diger, Signer};
 
     #[test]
+    fn sequence_numbers_read_back() {
+        use crate::parser::number_value;
+        for n in [
+            0u64,
+            1,
+            0xff,
+            0xffff,
+            0x1_0000,
+            0xffff_ffff,
+            0x1_0000_0000,
+            u64::MAX,
+        ] {
+            for table in [CounterTable::V1, CounterTable::V2] {
+                let qb64 = sequence_number(table, n).unwrap();
+                assert_eq!(number_value(&qb64).unwrap(), n, "{qb64}");
+            }
+        }
+        assert_eq!(number_value("MAAB").unwrap(), 1);
+        assert!(number_value("EAAB").is_err());
+        assert!(number_value("MAA").is_err());
+    }
+
+    #[test]
     fn a_version_1_endorsement_is_an_f_group_with_a_seqner() {
         let serder = make_test_serder();
         let signer = Signer::new("A", [42u8; 32].to_vec()).unwrap();

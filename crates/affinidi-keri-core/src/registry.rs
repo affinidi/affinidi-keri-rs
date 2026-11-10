@@ -631,6 +631,15 @@ mod v1 {
                 group.said
             )
         })?;
+        // keripy finds the establishment event by its sequence number and then
+        // compares the SAID; a group naming the wrong one verifies nowhere.
+        let sn = crate::parser::number_value(&group.sn).map_err(|e| e.to_string())?;
+        if sn != state.sn {
+            return Err(format!(
+                "the signature group names establishment event {} at sn {sn}, but it is at sn {}",
+                group.said, state.sn
+            ));
+        }
         let mut indices = Vec::new();
         for sig in &group.sigs {
             let key = state
