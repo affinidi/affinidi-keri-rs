@@ -33,6 +33,8 @@
 //! credential the stream shows. A bare digest seal (`{d}`) names nothing it
 //! can be attributed to, so it is not checked.
 
+pub mod write;
+
 use affinidi_keri_crypto::{Diger, Verfer};
 
 use crate::error::CoreError;
