@@ -78,8 +78,18 @@ pub fn compute_said(
         obj.insert("i".into(), crate::sad::SadValue::String(dummy.clone()));
     }
 
-    // Serialize with the dummies in place
-    let serialized = serialize_sad(sad, kind)?;
+    // Serialize with the dummies in place. Natively, a dummy is written as
+    // its text, unencoded, as keripy does.
+    let serialized = if kind == SerializationKind::Cesr {
+        let dummied: &[&str] = if is_self_addressing {
+            &[label, "i"]
+        } else {
+            &[label]
+        };
+        crate::native::dump(sad, dummied)?.into_bytes()
+    } else {
+        serialize_sad(sad, kind)?
+    };
 
     // Compute the digest
     let diger = Diger::from_data(code, &serialized)?;
@@ -145,7 +155,7 @@ fn serialize_sad(
         SerializationKind::MsgPack => {
             rmp_serde::to_vec(sad).map_err(|e| CoreError::MsgPack(e.to_string()))
         }
-        SerializationKind::Cesr => Err(CoreError::native_cesr_unsupported()),
+        SerializationKind::Cesr => Ok(crate::native::dump(sad, &[])?.into_bytes()),
     }
 }
 

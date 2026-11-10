@@ -241,9 +241,13 @@ fn parse_next_inner(
     } else if first == b'-' {
         let counter = read_counter(rest)?;
         let base = counter.code.trim_start_matches('-');
+        if *genus == CounterTable::V2 && matches!(base, "F" | "G") {
+            // keripy CounterCodex_2_0: FixBodyGroup, MapBodyGroup. A native
+            // CESR body (P8).
+            let (msg, consumed) = parse_next_sad(rest, *genus, strict)?;
+            return Ok((msg, offset + consumed));
+        }
         Err(match (*genus, base) {
-            // keripy CounterCodex_2_0: FixBodyGroup, MapBodyGroup.
-            (CounterTable::V2, "F" | "G") => CoreError::native_cesr_unsupported(),
             (CounterTable::V2, "B" | "H") | (CounterTable::V1, "U" | "W") => {
                 CoreError::Unsupported(format!(
                     "enclosed message group {:?} in a {genus:?} stream",
@@ -317,8 +321,8 @@ fn parse_all_inner(stream: &[u8], strict: bool) -> Result<Vec<ParsedMessage>, Co
     Ok(messages)
 }
 
-/// Parse a SAD-based message (JSON/CBOR/MGPK) followed by CESR attachments,
-/// read in the stream's genus.
+/// Parse a message body (JSON, CBOR, MessagePack or native CESR) followed by
+/// CESR attachments, read in the stream's genus.
 fn parse_next_sad(
     stream: &[u8],
     genus: CounterTable,
@@ -385,6 +389,14 @@ fn parse_attachments(
             return Err(CoreError::ParseError(
                 "attachment data contains non-ASCII bytes".into(),
             ));
+        }
+        // In a 2.x stream a message body group opens the next message: a
+        // native CESR body (P8).
+        if table == CounterTable::V2
+            && read_counter(&data[offset..])
+                .is_ok_and(|c| matches!(c.code.trim_start_matches('-'), "F" | "G"))
+        {
+            break;
         }
         let (group, consumed) = parse_group(&data[offset..], table, strict)?;
         offset += consumed;

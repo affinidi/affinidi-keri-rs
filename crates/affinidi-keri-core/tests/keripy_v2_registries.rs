@@ -131,10 +131,26 @@ fn an_unanchored_update_fails_the_read() {
     check("v2-update-unanchored");
 }
 
+/// Native CESR bodies throughout (P8): the KEL, the registry events and the
+/// ACDC, whose SAID is over its most compact form, natively.
+#[test]
+fn native_registries_read_as_their_json_twins() {
+    check("v2-issued-native");
+    check("v2-revoked-native");
+    let f = load("v2-revoked-native");
+    assert!(
+        f.messages
+            .iter()
+            .all(|m| m.serder.kind() == affinidi_keri_core::version::SerializationKind::Cesr)
+    );
+}
+
 #[test]
 fn every_fixture_is_covered() {
     let covered = [
         "v2-issued",
+        "v2-issued-native",
+        "v2-revoked-native",
         "v2-revoked",
         "v2-revoked-as-of-issuance",
         "v2-revocation-withheld",

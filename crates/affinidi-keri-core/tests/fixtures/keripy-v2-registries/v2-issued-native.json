@@ -1,0 +1,14 @@
+{
+  "note": "v2-issued with every body native CESR",
+  "issuer": "EHu4elqOAiHzwemBF9EW7xObvxTM1T71XQxdoXCW5SMV",
+  "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+  "registry": "EAkRKuIARJF4XhFTo2-Dct6N4vCbPnHvOzmHaXSz1zrD",
+  "credential": "EPpLKKzFGMu9xeIzaErKs0kDq03YEfXKqXFEMHQdpgWF",
+  "limit": null,
+  "expect": "issued",
+  "keripy": {
+    "status": "issued",
+    "binding": "mutual",
+    "head": "EBYxGd9B69tnDmncbia8SZK0SEQwYhR-MxOwv7Xsof1k"
+  }
+}

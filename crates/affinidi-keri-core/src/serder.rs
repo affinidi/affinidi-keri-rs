@@ -39,6 +39,9 @@ impl Serder {
     /// # Errors
     /// Returns `CoreError` if serialization fails.
     pub fn new(kind: SerializationKind, mut sad: crate::sad::SadValue) -> Result<Self, CoreError> {
+        if kind == SerializationKind::Cesr {
+            return Self::new_native(sad);
+        }
         // First pass: serialize to compute size
         let raw = serialize_value(&sad, kind)?;
 
@@ -101,6 +104,30 @@ impl Serder {
         })
     }
 
+    /// A native CESR message: its version string's size is the body's size,
+    /// which the body itself does not carry.
+    fn new_native(mut sad: crate::sad::SadValue) -> Result<Self, CoreError> {
+        let raw = crate::native::dump(&sad, &[])?.into_bytes();
+        let vs = sad
+            .get("v")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CoreError::MissingField("v".into()))?;
+        let mut version = Version::parse_str(vs)?;
+        version.size = raw.len();
+        if let Some(obj) = sad.as_object_mut() {
+            obj.insert(
+                "v".into(),
+                crate::sad::SadValue::String(version.to_version_string()),
+            );
+        }
+        Ok(Self {
+            raw,
+            version: Some(version),
+            kind: SerializationKind::Cesr,
+            sad,
+        })
+    }
+
     /// Create a Serder from raw bytes.
     ///
     /// Detects the serialization format from the first byte(s), parses the
@@ -115,6 +142,15 @@ impl Serder {
 
         // Sniff the format
         let kind = sniff_kind(raw)?;
+        if kind == SerializationKind::Cesr {
+            let (sad, version, size) = crate::native::load(raw)?;
+            return Ok(Self {
+                raw: raw[..size].to_vec(),
+                version: Some(version),
+                kind,
+                sad,
+            });
+        }
 
         // For JSON/CBOR/MGPK, the version string is embedded in the `v` field,
         // not at the start of the raw bytes. We can try to extract the version
@@ -288,14 +324,16 @@ fn extract_version_from_raw(data: &[u8], _kind: SerializationKind) -> Option<Ver
     Version::parse(&data[pos..]).ok()
 }
 
-/// Detect serialization kind from the first byte of raw data.
-fn sniff_kind(data: &[u8]) -> Result<SerializationKind, CoreError> {
+/// Detect serialization kind from the first byte of raw data: a native CESR
+/// body starts with its body group counter.
+pub(crate) fn sniff_kind(data: &[u8]) -> Result<SerializationKind, CoreError> {
     if data.is_empty() {
         return Err(CoreError::ParseError("empty data".into()));
     }
 
     match data[0] {
         b'{' => Ok(SerializationKind::Json),
+        b'-' => Ok(SerializationKind::Cesr),
         0xa0..=0xb7 | 0xb8 | 0xb9 | 0xba | 0xbb | 0xbf => Ok(SerializationKind::Cbor),
         0x80..=0x8f | 0xde | 0xdf => Ok(SerializationKind::MsgPack),
         _ => Err(CoreError::ParseError(format!(
@@ -320,7 +358,7 @@ fn serialize_value(
         SerializationKind::MsgPack => {
             rmp_serde::to_vec(value).map_err(|e| CoreError::MsgPack(e.to_string()))
         }
-        SerializationKind::Cesr => Err(CoreError::native_cesr_unsupported()),
+        SerializationKind::Cesr => Ok(crate::native::dump(value, &[])?.into_bytes()),
     }
 }
 
@@ -337,7 +375,7 @@ fn deserialize_value(
         SerializationKind::MsgPack => {
             rmp_serde::from_slice(data).map_err(|e| CoreError::MsgPack(e.to_string()))
         }
-        SerializationKind::Cesr => Err(CoreError::native_cesr_unsupported()),
+        SerializationKind::Cesr => Ok(crate::native::load(data)?.0),
     }
 }
 

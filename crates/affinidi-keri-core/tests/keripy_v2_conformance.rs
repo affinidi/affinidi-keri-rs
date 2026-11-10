@@ -14,6 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use affinidi_keri_core::CoreError;
+use affinidi_keri_core::delegation::{DelegationProof, DelegatorAnchors};
 use affinidi_keri_core::kever::Kever;
 use affinidi_keri_core::parser::{self, ParsedMessage};
 use affinidi_keri_core::threshold::Threshold;
@@ -249,20 +250,155 @@ fn a_kel_never_goes_down_a_version() {
 }
 
 #[test]
-fn native_cesr_bodies_are_refused_by_name() {
-    // TODO(P8): read native CESR bodies before the integration leaves alpha.
-    // keripy accepts this stream (its default body kind is CESR); until then
-    // it must fail closed, by name, rather than be skipped.
-    let f = fixture("v2-basic-native");
-    assert_eq!(f.expect, "accept");
-    match parser::parse_all(&f.published) {
-        Err(CoreError::Unsupported(msg)) => {
-            assert_eq!(msg, "native CESR bodies not yet supported");
+fn v2_basic_native() {
+    // keripy's default body kind is native CESR (P8).
+    accepts("v2-basic-native");
+}
+
+#[test]
+fn v2_native_recovery() {
+    // A weighted threshold, a configuration trait and seals of every type,
+    // natively; then the recovery key's rotation.
+    let f = fixture("v2-native-recovery");
+    let messages = parser::parse_all(&f.published).unwrap();
+    let seals = messages[1].serder.sad()["a"].as_array().unwrap();
+    assert_eq!(seals.len(), 7);
+    assert_eq!(
+        messages[0].serder.sad()["c"].to_json_value(),
+        serde_json::json!(["DND"])
+    );
+    accepts("v2-native-recovery");
+}
+
+#[test]
+fn native_bodies_verify_through_the_owned_sad_paths() {
+    // `new_from_parts` and `verify_update_owned` take the SAD apart from the
+    // raw bytes; the SAID must still be computed over the body's own kind.
+    let f = fixture("v2-native-recovery");
+    let mut messages = parser::parse_all(&f.published).unwrap();
+    let verfers: Vec<Verfer> = messages[0].serder.sad()["k"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|k| Verfer::from_qb64(k.as_str().unwrap()).unwrap())
+        .collect();
+    let icp = &mut messages[0];
+    let sad = icp.serder.take_sad();
+    let mut kever =
+        Kever::new_from_parts(icp.serder.raw(), sad, icp.controller_sigs(), &verfers).unwrap();
+    for m in messages.iter_mut().skip(1) {
+        let sad = m.serder.take_sad();
+        let next = kever
+            .verify_update_owned(m.serder.raw(), sad, m.controller_sigs())
+            .unwrap();
+        kever.apply_verified_update(next);
+    }
+    assert_eq!(kever.state().sn, f.keripy["sn"].as_u64().unwrap());
+    assert_eq!(
+        kever.state().last_event_digest,
+        f.keripy["said"].as_str().unwrap()
+    );
+}
+
+/// The anchors in a delegator's KEL, verified by replaying it.
+struct VerifiedDelegator {
+    prefix: String,
+    events: Vec<(u64, String, Vec<affinidi_keri_core::SadValue>)>,
+}
+
+impl DelegatorAnchors for VerifiedDelegator {
+    fn anchors_at(
+        &self,
+        delegator: &str,
+        sn: u64,
+        said: &str,
+    ) -> Result<Option<Vec<affinidi_keri_core::SadValue>>, CoreError> {
+        if delegator != self.prefix {
+            return Ok(None);
         }
-        other => panic!(
-            "expected the native-CESR refusal, got {:?}",
-            other.map(|m| m.len())
-        ),
+        Ok(self
+            .events
+            .iter()
+            .find(|(s, d, _)| *s == sn && d == said)
+            .map(|(_, _, seals)| seals.clone()))
+    }
+}
+
+#[test]
+fn v2_native_delegated() {
+    let f = fixture("v2-native-delegated");
+    let json: Value =
+        serde_json::from_slice(&std::fs::read(dir().join("v2-native-delegated.json")).unwrap())
+            .unwrap();
+    let messages = parser::parse_all(&f.published).unwrap();
+    let delegator = json["delegator"]["prefix"].as_str().unwrap();
+    let (theirs, ours): (Vec<_>, Vec<_>) = messages
+        .into_iter()
+        .partition(|m| m.serder.prefix().unwrap() == delegator);
+
+    // The delegator's KEL, verified, gives the anchors.
+    let r = replay(&theirs);
+    assert!(r.refused.is_none(), "{:?}", r.refused);
+    assert_state("delegator", &r, &json["delegator"]);
+    let anchors = VerifiedDelegator {
+        prefix: delegator.into(),
+        events: theirs
+            .iter()
+            .map(|m| {
+                let seals = m.serder.sad()["a"].as_array().cloned().unwrap_or_default();
+                (m.serder.sn().unwrap(), m.serder.said().unwrap(), seals)
+            })
+            .collect(),
+    };
+
+    // The delegate: its dip and drt each name the anchoring event.
+    let proof = |m: &ParsedMessage| {
+        let [(sn, said)] = m.seal_source_couples() else {
+            panic!("one seal source couple");
+        };
+        DelegationProof::from_seal_source_couple(sn, said).unwrap()
+    };
+    let dip = &ours[0];
+    let verfers: Vec<Verfer> = dip.serder.sad()["k"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|k| Verfer::from_qb64(k.as_str().unwrap()).unwrap())
+        .collect();
+    let kever = Kever::new_delegated(
+        &dip.serder,
+        dip.controller_sigs(),
+        &verfers,
+        &proof(dip),
+        &anchors,
+    )
+    .expect("keripy's dip verifies");
+    let s = kever.state();
+    assert_eq!(s.prefix, f.keripy["prefix"].as_str().unwrap());
+    assert_eq!(s.sn, 0);
+
+    // An anchor for a different event does not authorise the dip.
+    let elsewhere = DelegationProof::from_seal_source_couple("MAAC", &anchors.events[2].1).unwrap();
+    assert!(
+        Kever::new_delegated(
+            &dip.serder,
+            dip.controller_sigs(),
+            &verfers,
+            &elsewhere,
+            &anchors
+        )
+        .is_err()
+    );
+
+    // TODO(drt): keripy accepts this drt (its state is at sn 1). A 2.x `drt`
+    // has no `di` (fields.rs), but `verify_update_delegated` reads one, so
+    // it is refused, whatever the body's kind. Until that is fixed it must be
+    // refused by name, not accepted with the wrong delegator.
+    let drt = &ours[1];
+    assert_eq!(f.keripy["sn"], 1);
+    match kever.verify_update_delegated(&drt.serder, drt.controller_sigs(), &proof(drt), &anchors) {
+        Err(CoreError::Json(e)) if e.to_string().contains("missing field `di`") => {}
+        other => panic!("the drt gap has changed; update this test: {other:?}"),
     }
 }
 
@@ -409,6 +545,9 @@ fn every_fixture_is_covered() {
             "v2-basic-native",
             "v2-endorsed-replies",
             "v2-multisig-2of3",
+            "v2-native-delegated",
+            "v2-native-messages",
+            "v2-native-recovery",
             "v2-recovery-by-k",
             "v2-recovery-by-r-and-k",
             "v2-recovery-routine-alone",

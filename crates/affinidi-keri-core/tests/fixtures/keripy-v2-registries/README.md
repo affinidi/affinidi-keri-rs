@@ -31,6 +31,11 @@ Regenerate (keripy 2.x installed, libsodium on the library path):
 
 Output is byte-identical between runs.
 
+`v2-issued-native` and `v2-revoked-native` are `v2-issued` and `v2-revoked`
+with every body native CESR, keripy's default: the KEL, the registry events
+and the ACDC, whose SAID is over its most compact form with each section a
+native field map.
+
 ## Where `expect` and keripy differ
 
 - **`v2-revocation-withheld`**: the KEL anchors the revoking update, but the
