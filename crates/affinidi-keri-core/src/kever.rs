@@ -15,7 +15,6 @@ use crate::event::{
 use crate::key_state::KeyState;
 use crate::said;
 use crate::serder::Serder;
-use crate::version::SerializationKind;
 
 /// Key Event Verifier for a single KERI identifier.
 ///
@@ -200,8 +199,9 @@ impl Kever {
             )));
         }
 
-        // Verify SAID integrity before trusting any event fields
-        said::verify_said(&sad, "d", "E", SerializationKind::Json)?;
+        // Verify SAID integrity before trusting any event fields, in the
+        // serialization the event arrived in.
+        said::verify_said(&sad, "d", "E", crate::serder::sniff_kind(raw)?)?;
 
         check_shape(&sad, "icp")?;
         let icp: InceptionEvent = sad.deserialize_into().map_err(CoreError::Json)?;
@@ -336,8 +336,9 @@ impl Kever {
             ));
         }
 
-        // Verify SAID integrity before trusting any event fields
-        said::verify_said(&sad, "d", "E", SerializationKind::Json)?;
+        // Verify SAID integrity before trusting any event fields, in the
+        // serialization the event arrived in.
+        said::verify_said(&sad, "d", "E", crate::serder::sniff_kind(raw)?)?;
 
         let ilk = sad
             .get("t")

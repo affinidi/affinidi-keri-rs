@@ -1,0 +1,42 @@
+{
+  "note": "native delegator KEL (icp, ixn, ixn) then the delegate's dip and drt, each with a seal source couple naming the anchoring ixn",
+  "expect": "accept",
+  "delegator": {
+    "prefix": "EJiumUmQzmSOpf_wwl_n7j5W7Uw9CwRdY1nhRWOOtCTf",
+    "sn": 2,
+    "said": "EGsFscVCyT2OENVnzBeb79jNeik4sfJ4mSAW7nPgD38B",
+    "ilk": "ixn",
+    "version": "2.0",
+    "keys": [
+      "DG0A98SZpwcp90JUiKEKTiVTOSlX0mekHZmjbWOLlfSw"
+    ],
+    "kt": "1",
+    "n": [
+      "EHDLnqXEevgxDFQG2uldEJVBYgkGb0xAJSUr3YYeeqd4"
+    ],
+    "nt": "1",
+    "establishment": {
+      "sn": 0,
+      "said": "EJiumUmQzmSOpf_wwl_n7j5W7Uw9CwRdY1nhRWOOtCTf"
+    }
+  },
+  "keripy": {
+    "prefix": "EFHIh2pDPw3j6QtdHCGdbZnramH_GshnSZE1R08fAJQy",
+    "sn": 1,
+    "said": "ED3vyT54dj4bXHSv5aA4sXKNoPm-4p_FTObEEvt8BtLh",
+    "ilk": "drt",
+    "version": "2.0",
+    "keys": [
+      "DJODzIOEsb8qM_89XgSEyZB3GSTOUheWTBRheJPV-7mu"
+    ],
+    "kt": "1",
+    "n": [
+      "EAiBgxlvHwYE4JoVm3UY0p5jPaYvgnw-GTOjOKbseT3Z"
+    ],
+    "nt": "1",
+    "establishment": {
+      "sn": 1,
+      "said": "ED3vyT54dj4bXHSv5aA4sXKNoPm-4p_FTObEEvt8BtLh"
+    }
+  }
+}

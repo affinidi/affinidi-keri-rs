@@ -43,6 +43,7 @@ use crate::kever::Kever;
 use crate::key_state::KeyState;
 use crate::parser::{Attachment, BlindedState, ParsedMessage, TransIdxSigGroup};
 use crate::sad::SadValue;
+use crate::version::SerializationKind;
 
 /// Where in the issuer's KEL something is anchored.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -489,21 +490,21 @@ fn digest_code(said: &str) -> Result<&'static str, String> {
     }
 }
 
-/// The SAID `label` would have over `sad` as given.
-fn recompute(sad: &SadValue, label: &str, code: &str) -> Result<String, String> {
+/// The SAID `label` would have over `sad` as given, serialized as `kind`.
+fn recompute(
+    sad: &SadValue,
+    label: &str,
+    code: &str,
+    kind: SerializationKind,
+) -> Result<String, String> {
     let mut copy = sad.clone();
-    crate::said::compute_said(
-        &mut copy,
-        label,
-        code,
-        crate::version::SerializationKind::Json,
-    )
-    .map_err(|e| format!("cannot compute the SAID: {e}"))
+    crate::said::compute_said(&mut copy, label, code, kind)
+        .map_err(|e| format!("cannot compute the SAID: {e}"))
 }
 
 fn verify_plain_said(msg: &ParsedMessage) -> Result<String, String> {
     let said = said_of(msg).ok_or("the message has no SAID")?;
-    let computed = recompute(msg.serder.sad(), "d", digest_code(said)?)?;
+    let computed = recompute(msg.serder.sad(), "d", digest_code(said)?, msg.serder.kind())?;
     if computed != said {
         return Err(format!(
             "the message's SAID is {said}, but its content gives {computed}"
@@ -704,7 +705,7 @@ mod v2 {
         if let Err(e) = check_acdc_fields(sad, 2, ilk) {
             return Ok(Err(e.to_string()));
         }
-        let said = match verify_compact_said(sad) {
+        let said = match verify_compact_said(sad, msg.serder.kind()) {
             Ok(s) => s,
             Err(e) => return Ok(Err(e)),
         };
@@ -980,8 +981,9 @@ mod v2 {
 
     /// An ACDC 2.x SAID is computed over its most compact form: each
     /// expanded section replaced by its own SAID, and the version string
-    /// sized for that form (keripy `SerderACDC._compute`).
-    fn verify_compact_said(sad: &SadValue) -> Result<String, String> {
+    /// sized for that form (keripy `SerderACDC._compute`). A native body's
+    /// sections are native field maps, and its version field carries no size.
+    fn verify_compact_said(sad: &SadValue, kind: SerializationKind) -> Result<String, String> {
         let said = sad
             .get("d")
             .and_then(|v| v.as_str())
@@ -996,9 +998,9 @@ mod v2 {
                 continue;
             }
             let section_said = if label == "s" {
-                recompute(section, "$id", code)?
+                recompute(section, "$id", code, kind)?
             } else {
-                compact_section(section, code)?
+                compact_section(section, code, kind)?
             };
             compact.insert(label, SadValue::String(section_said));
         }
@@ -1006,19 +1008,22 @@ mod v2 {
             return Err("an expanded aggregate section (`A`) is not supported".into());
         }
 
-        // Size the version string for the compact form, then compute.
-        compact.insert("d", SadValue::String("#".repeat(said.len())));
-        let size = serde_json::to_vec(&compact)
-            .map_err(|e| e.to_string())?
-            .len();
-        let vs = compact
-            .get("v")
-            .and_then(|v| v.as_str())
-            .ok_or("the credential has no version")?;
-        let mut version = crate::version::Version::parse_str(vs).map_err(|e| e.to_string())?;
-        version.size = size;
-        compact.insert("v", SadValue::String(version.to_version_string()));
-        let computed = recompute(&compact, "d", code)?;
+        // Size the version string for the compact form, then compute. A
+        // native version field carries no size.
+        if kind != SerializationKind::Cesr {
+            compact.insert("d", SadValue::String("#".repeat(said.len())));
+            let size = serde_json::to_vec(&compact)
+                .map_err(|e| e.to_string())?
+                .len();
+            let vs = compact
+                .get("v")
+                .and_then(|v| v.as_str())
+                .ok_or("the credential has no version")?;
+            let mut version = crate::version::Version::parse_str(vs).map_err(|e| e.to_string())?;
+            version.size = size;
+            compact.insert("v", SadValue::String(version.to_version_string()));
+        }
+        let computed = recompute(&compact, "d", code, kind)?;
         if computed != said {
             return Err(format!(
                 "the credential's SAID is {said}, but its compact form gives {computed}"
@@ -1029,15 +1034,19 @@ mod v2 {
 
     /// A section's SAID over its most compact form: each nested block that
     /// has a `d` replaced by its own SAID, innermost first.
-    fn compact_section(section: &SadValue, code: &str) -> Result<String, String> {
+    fn compact_section(
+        section: &SadValue,
+        code: &str,
+        kind: SerializationKind,
+    ) -> Result<String, String> {
         let mut copy = section.clone();
         if let Some(obj) = copy.as_object_mut() {
             for value in obj.values_mut() {
                 if value.is_object() && value.get("d").is_some() {
-                    *value = SadValue::String(compact_section(value, code)?);
+                    *value = SadValue::String(compact_section(value, code, kind)?);
                 }
             }
         }
-        recompute(&copy, "d", code)
+        recompute(&copy, "d", code, kind)
     }
 }

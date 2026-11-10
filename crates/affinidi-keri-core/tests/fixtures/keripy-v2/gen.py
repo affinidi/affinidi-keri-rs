@@ -27,7 +27,7 @@ import sys
 
 import keri
 from keri import Kinds, Vrsn_1_0, Vrsn_2_0
-from keri.core import Counter, DigDex, Diger, Kevery, Number, Parser, Prefixer, Salter, incept, interact, messagize, reply, rotate
+from keri.core import Counter, DigDex, Diger, Kevery, Number, Parser, Prefixer, Salter, SealSource, delcept, deltate, incept, interact, messagize, reply, rotate
 from keri.core import routing
 import contextlib
 import itertools
@@ -318,6 +318,147 @@ def endorsed(outdir):
     print(f"{'v2-endorsed-replies':32} {len(published):6} bytes  keripy accepted {len(ends)} end, {len(locs)} loc")
 
 
+def native(outdir):
+    """KERI 2.0 native CESR bodies (P8), keripy's default kind. The recovery
+    custodian's shape with every native field type a KEL uses: a weighted
+    threshold (written as one clause, read back flat), a configuration trait,
+    and an interaction event carrying one seal of each type keripy writes, in
+    groups of one type each."""
+    K = Kinds.cesr
+    r0, r1, k, r2, k2 = keys(5, "native")
+    nt = [["1/2", "1"]]
+    icp = incept(code=DigDex.Blake3_256, keys=[r0.verfer.qb64], ndigs=[ndig(r1), ndig(k)],
+                 nsith=nt, cnfg=["DND"], kind=K)
+    pre = icp.pre
+    seals = [
+        {"i": pre, "s": "0", "d": icp.said},
+        {"d": icp.said},
+        {"d": ndig(r2)},
+        {"s": "0", "d": icp.said},
+        {"i": pre},
+        {"bi": pre, "d": icp.said},
+        {"rd": ndig(k2)},
+    ]
+    ixn = interact(pre=pre, dig=icp.said, sn=1, data=seals, kind=K)
+    if [dict(x) for x in ixn.sad["a"]] != seals:
+        raise SystemExit(f"v2-native-recovery: keripy did not keep the seals: {ixn.sad['a']}")
+    rot = rotate(pre=pre, keys=[r1.verfer.qb64, k.verfer.qb64], isith=["1/2", "1"], dig=ixn.said,
+                 ndigs=[ndig(r2), ndig(k2)], nsith=nt, sn=2, kind=K)
+    msgs = [msg(icp, [(r0, 0, None)]), msg(ixn, [(r0, 0, None)]), msg(rot, [(k, 1, None)])]
+    scenario(outdir, "v2-native-recovery", pre, msgs, genus=Vrsn_2_0, expect="accept",
+             note="native bodies: icp (nt [[1/2, 1]], c [DND]), ixn with seven seals of six "
+                  "types, rot by the recovery key K under kt [1/2, 1]")
+
+
+def native_delegated(outdir):
+    """A delegator and a delegate, every body native: the delegator's ixn
+    events anchor the delegate's dip and drt, which carry seal source couples
+    naming them (`-S`, a 2.x `Number` and a SAID)."""
+    K = Kinds.cesr
+    dr = keys(3, "delegator")
+    de = keys(3, "delegate")
+    icp = incept(code=DigDex.Blake3_256, keys=[dr[0].verfer.qb64], ndigs=[ndig(dr[1])], kind=K)
+    delegator = icp.pre
+    dip = delcept(keys=[de[0].verfer.qb64], delpre=delegator, ndigs=[ndig(de[1])], kind=K)
+    ixn1 = interact(pre=delegator, dig=icp.said, sn=1,
+                    data=[{"i": dip.pre, "s": "0", "d": dip.said}], kind=K)
+    drt = deltate(pre=dip.pre, keys=[de[1].verfer.qb64], dig=dip.said, ndigs=[ndig(de[2])], sn=1, kind=K)
+    ixn2 = interact(pre=delegator, dig=ixn1.said, sn=2,
+                    data=[{"i": dip.pre, "s": "1", "d": drt.said}], kind=K)
+
+    def signed(serder, signer, source=None):
+        sigers = [signer.sign(serder.raw, index=0)]
+        bonds = [source] if source else None
+        return bytes(messagize(serder, sigers=sigers, bonds=bonds, gvrsn=Vrsn_2_0))
+
+    msgs = [signed(icp, dr[0]), signed(ixn1, dr[0]), signed(ixn2, dr[0]),
+            signed(dip, de[0], SealSource(s=1, d=ixn1.said)),
+            signed(drt, de[1], SealSource(s=2, d=ixn2.said))]
+    db, kvy = process(msgs)
+    if dip.pre not in kvy.kevers or kvy.kevers[dip.pre].sn != 1:
+        raise SystemExit("v2-native-delegated: keripy did not accept the delegation")
+    published = bytearray(Counter.makeGVC(version=Vrsn_2_0))
+    for p in (delegator, dip.pre):
+        for m in db.clonePreIter(pre=p, gvrsn=Vrsn_2_0):
+            published.extend(m)
+    published = bytes(published)
+    _, kvy2 = process([published], version=Vrsn_2_0)
+    for p in (delegator, dip.pre):
+        if state(kvy2.kevers.get(p)) != state(kvy.kevers[p]):
+            raise SystemExit("v2-native-delegated: keripy re-reads its stream differently")
+    with open(os.path.join(outdir, "v2-native-delegated.cesr"), "wb") as f:
+        f.write(published)
+    with open(os.path.join(outdir, "v2-native-delegated.json"), "w") as f:
+        json.dump({"note": "native delegator KEL (icp, ixn, ixn) then the delegate's dip and drt, "
+                           "each with a seal source couple naming the anchoring ixn",
+                   "expect": "accept", "delegator": state(kvy.kevers[delegator]),
+                   "keripy": state(kvy.kevers[dip.pre])}, f, indent=2)
+        f.write("\n")
+    print(f"{'v2-native-delegated':32} {len(published):6} bytes  keripy sn={kvy.kevers[dip.pre].sn}")
+
+
+def native_messages(outdir):
+    """One native message of every type keripy reads natively, each with the
+    SAD keripy reads from it. A reader must read the same SAD, and verify the
+    same SAID. The field values exercise every primitive a native body uses:
+    field maps with every value kind (keripy `Mapper`), paths, date-times,
+    nonces, a nested weighted threshold, and text that is itself a primitive
+    (written escaped)."""
+    from keri.core.serdering import SerderKERI, SerderACDC
+    from keri.acdc import acdcmap, blindate, regcept, update as regupdate
+    from keri.core import Noncer, Verser
+    K = Kinds.cesr
+    s = keys(4, "messages")
+    pre = incept(code=DigDex.Blake3_256, keys=[s[0].verfer.qb64], ndigs=[ndig(s[1])], kind=K).pre
+    said = ndig(s[2])
+    stamp = "2026-01-01T00:00:00.000000+00:00"
+    attributes = {
+        "yes": True, "no": False, "none": None, "n": 3, "neg": -5, "x": 1.5,
+        "empty": "", "said": said, "short": "abc", "long": "abcdefghijklmnopq",
+        "leadingA": "AAAAAAAAAAAAA", "tagLike": "Xicp", "url": "https://example.com/a?b=c",
+        "list": [1, "two", {"m": "Xicp"}, [], {}],
+        "nested": {"d": "", "deeper": {"k": "v"}},
+    }
+    out = []
+
+    def add(name, serder):
+        out.append({"name": name, "raw": serder.raw.decode(), "sad": serder.sad,
+                    "said": serder.said})
+
+    def keri(ilk, **fields):
+        return SerderKERI(sad=dict(t=ilk, **fields), makify=True, kind=K, ilk=ilk, pvrsn=Vrsn_2_0, gvrsn=Vrsn_2_0)
+
+    add("icp-nested-weights", keri("icp", i=pre, s="0",
+        kt=[[{"1/2": ["1/2", "1/2"]}, "1/2"], ["1"]],
+        k=[x.verfer.qb64 for x in s[:3]], nt="2", n=[ndig(x) for x in s[:3]],
+        bt="0", b=[], c=["EO", "DND", "RB", "NB", "NRB", "DID"], a=[]))
+    add("rct", keri("rct", d=said, i=pre, s="a"))
+    add("rpy-end-role", reply(pre=pre, route="/end/role/add",
+        data=dict(cid=pre, role="controller", eid=pre), stamp=stamp, pvrsn=Vrsn_2_0, kind=K))
+    add("rpy-loc-scheme", reply(pre=pre, route="/loc/scheme",
+        data=dict(eid=pre, scheme="https", url="https://example.com/"), stamp=stamp, pvrsn=Vrsn_2_0, kind=K))
+    add("rpy-every-value", reply(pre=pre, route="/a/b_c/Abc", data=attributes, stamp=stamp,
+        pvrsn=Vrsn_2_0, kind=K))
+    add("qry", keri("qry", i=pre, dt=stamp, r="ksn", rr="/reply/to", q=dict(i=pre, s="0", src=pre)))
+    add("pro", keri("pro", i=pre, dt=stamp, r="/a", rr="", q={}))
+    add("bar", keri("bar", i=pre, dt=stamp, r="/b", a=attributes))
+    add("xip", keri("xip", u=Noncer(raw=b"0123456789abcdef").qb64, i=pre, ri=pre, dt=stamp,
+        r="/exn/start", q={}, a={"m": "hello"}))
+    add("exn", keri("exn", i=pre, ri=pre, x=said, p=said, dt=stamp, r="/exn/next", q={}, a={"m": "hi"}))
+    rip = regcept(israid=pre, uuid=Salter(raw=b"registry-uuid-01").qb64, stamp=stamp, kind=K)
+    add("rip", rip)
+    add("bup", blindate(regid=rip.said, prior=rip.said, blid=said, sn=1, stamp=stamp, kind=K))
+    add("upd", regupdate(regid=rip.said, prior=rip.said, acdc=said, state="issued", sn=1, stamp=stamp, kind=K))
+    add("acm", acdcmap(israid=pre, regid=rip.said, schema=said, attribute=attributes, kind=K))
+    add("acm-bare", acdcmap(israid=pre, ilk=None, schema=said, attribute={"d": "", "a": "b"}, kind=K))
+
+    with open(os.path.join(outdir, "v2-native-messages.json"), "w") as f:
+        json.dump({"note": "one native body per message type, with the SAD keripy reads from it",
+                   "messages": out}, f, indent=2)
+        f.write("\n")
+    print(f"{'v2-native-messages':32} {len(out):6} messages")
+
+
 def main(outdir):
     commit = subprocess.run(["git", "-C", os.path.dirname(keri.__file__), "rev-parse", "--short", "HEAD"],
                             capture_output=True, text=True).stdout.strip()
@@ -331,6 +472,9 @@ def main(outdir):
     migrated(outdir)
     downgrade(outdir)
     endorsed(outdir)
+    native(outdir)
+    native_delegated(outdir)
+    native_messages(outdir)
     with open(os.path.join(outdir, "KERIPY_VERSION"), "w") as f:
         f.write(f"keripy {keri.__version__} {commit}\n")
 

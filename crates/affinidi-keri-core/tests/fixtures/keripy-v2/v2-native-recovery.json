@@ -1,0 +1,31 @@
+{
+  "note": "native bodies: icp (nt [[1/2, 1]], c [DND]), ixn with seven seals of six types, rot by the recovery key K under kt [1/2, 1]",
+  "expect": "accept",
+  "keripy": {
+    "prefix": "EKXYFqCGbnI1xberjnMbKt1AjdglMdmDq0J9QeDv4f1q",
+    "sn": 2,
+    "said": "EC-C8IR_DJKxlInmfLi-vhlZOjf7BfiOfLkDHUw5Jenq",
+    "ilk": "rot",
+    "version": "2.0",
+    "keys": [
+      "DF0XBGjVNs3PPXvhBPt3pg74o3IBbMewTz6llvfrXm9P",
+      "DB9EcyhbEpO9kx9fnPVLVggFj87jKkB7rF5EPClPLIAA"
+    ],
+    "kt": [
+      "1/2",
+      "1"
+    ],
+    "n": [
+      "EFRHCXgnLdODhUT2r-te0jX6xTd0BTTx9oHU8vevncdX",
+      "EMvMzXRXavCz_50jR0k9WavjLWWVcKKUexYW6S7BMtc1"
+    ],
+    "nt": [
+      "1/2",
+      "1"
+    ],
+    "establishment": {
+      "sn": 2,
+      "said": "EC-C8IR_DJKxlInmfLi-vhlZOjf7BfiOfLkDHUw5Jenq"
+    }
+  }
+}

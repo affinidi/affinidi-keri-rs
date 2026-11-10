@@ -31,7 +31,7 @@ import subprocess
 import sys
 
 import keri
-from keri import Vrsn_1_0, Vrsn_2_0
+from keri import Kinds, Vrsn_1_0, Vrsn_2_0
 from keri.acdc import acdcmap, blindate, regcept
 from keri.acdc.regeventing import vet, vetBinds
 from keri.app import habbing
@@ -53,15 +53,16 @@ def blinder(acdc_said, state):
 
 
 class Issuer:
-    def __init__(self, stack, name, version):
+    def __init__(self, stack, name, version, kind=Kinds.json):
         self.hby, self.hab = stack.enter_context(habbing.openHab(
-            name=name, temp=True, version=version,
+            name=name, temp=True, version=version, kind=kind,
             salt=Salter(raw=b"vti-keri-v2-regs").qb64b))
         self.version = version
+        self.kind = kind
         self.anchors = {}  # registry event SAID -> (kel sn, kel said)
 
     def anchor(self, *serders):
-        self.hab.interact(data=[dict(s=s.sad["n"], d=s.said) for s in serders])
+        self.hab.interact(data=[dict(s=s.sad["n"], d=s.said) for s in serders], kind=self.kind)
         ev = self.hab.kever.serder
         for s in serders:
             self.anchors[s.said] = (ev.sn, ev.said)
@@ -143,11 +144,13 @@ def write(outdir, name, issuer, rip, acdc, stream, *, expect, keripy, note, limi
 
 
 def registry(issuer):
-    rip = regcept(israid=issuer.hab.pre, uuid=Salter(raw=b"registry-uuid-01").qb64, stamp=STAMPS[0])
+    rip = regcept(israid=issuer.hab.pre, uuid=Salter(raw=b"registry-uuid-01").qb64, stamp=STAMPS[0],
+                  kind=issuer.kind)
     issuer.anchor(rip)
     acdc = acdcmap(israid=issuer.hab.pre, regid=rip.said, schema=ALIASES_V2,
                    attribute=dict(d="", dt=STAMPS[0],
-                                  ids=[f"did:webs:example.com:{issuer.hab.pre}"]))
+                                  ids=[f"did:webs:example.com:{issuer.hab.pre}"]),
+                   kind=issuer.kind)
     return rip, acdc
 
 
@@ -160,15 +163,16 @@ def update(issuer, rip, prior, n, acdc_said, state, anchored=True, salted=False)
     # two updates disclosing the same state have the same BLID.
     bl = (Blinder.blind(acdc=acdc_said, state=state, salt=SALT, sn=n) if salted
           else blinder(acdc_said, state))
-    bup = blindate(regid=rip.said, prior=prior.said, blid=bl.said, sn=n, stamp=STAMPS[n])
+    bup = blindate(regid=rip.said, prior=prior.said, blid=bl.said, sn=n, stamp=STAMPS[n],
+                   kind=issuer.kind)
     if anchored:
         issuer.anchor(bup)
     return bup, bl
 
 
 def scenarios(outdir, stack):
-    def fresh(name, version=Vrsn_2_0):
-        iss = Issuer(stack, name, version)
+    def fresh(name, version=Vrsn_2_0, kind=Kinds.json):
+        iss = Issuer(stack, name, version, kind)
         rip, acdc = registry(iss)
         return iss, rip, acdc
 
@@ -248,6 +252,18 @@ def scenarios(outdir, stack):
           expect="error:unanchored-event", keripy=keripy_verdict(iss, rip, acdc, u),
           note="a bup the issuer's KEL never anchored is in the stream: it establishes "
                "nothing, and keripy refuses the whole determination")
+
+    # Native CESR bodies throughout (P8): the KEL, the registry, the ACDC and
+    # its updates, as keripy writes them by default.
+    iss, rip, acdc = fresh("revoked-native", kind=Kinds.cesr)
+    u = [update(iss, rip, rip, 1, acdc.said, "issued", salted=True)]
+    write(outdir, "v2-issued-native", iss, rip, acdc, compose(iss, rip, acdc, u),
+          expect="issued", keripy=keripy_verdict(iss, rip, acdc, u),
+          note="v2-issued with every body native CESR")
+    u.append(update(iss, rip, u[0][0], 2, acdc.said, "revoked", salted=True))
+    write(outdir, "v2-revoked-native", iss, rip, acdc, compose(iss, rip, acdc, u),
+          expect="revoked", keripy=keripy_verdict(iss, rip, acdc, u),
+          note="v2-revoked with every body native CESR, each update with its own UUID")
 
     # A v1 KEL anchoring a v2 registry is allowed (P2) but not generated here:
     # keripy's Hab(version=Vrsn_1_0) writes a v1 icp and then v2 ixn events, and

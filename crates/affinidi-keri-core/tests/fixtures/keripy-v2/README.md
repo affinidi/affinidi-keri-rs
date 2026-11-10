@@ -57,4 +57,23 @@ moving to a newer keripy commit is a behaviour change to review.
 - **A version decrease is accepted.** keripy accepts a v1 `ixn` after a v2 `icp`
   (`downgrade-v2-to-v1`); VTI's position is to refuse it.
 - **The default body serialisation is native CESR** (`Kind = 'CESR'`).
-  `v2-basic-native` is the native form of `v2-basic`.
+  `v2-basic-native` is the native form of `v2-basic`; `v2-native-recovery`
+  (a weighted threshold, a configuration trait, seven seals of six types) and
+  `v2-native-delegated` (a `dip` and a `drt` with their seal source couples)
+  are native throughout. `v2-native-messages.json` holds one native body of
+  each message type keripy reads natively, with the SAD keripy reads from it.
+- **A native body is a CESR group of primitives in the type's field order**
+  (`-F`, or `-G` for an ACDC field map), and keripy accepts one only if
+  writing the SAD it read gives back the same bytes. A number has one code
+  (the smallest of `M`, `R`, `N`, …) though `0H` also reads; a weighted
+  threshold is a `Bexter` (`1s2c1`), written as one clause and read back flat;
+  a string that is itself a primitive is written verbatim, escaped (`1AAO`)
+  if its code is a label code; anything else is a label, which reads back as
+  text. The version field carries no size: `v` is rebuilt from the body's
+  length.
+- **A receipt (`rct`) has no SAID of its own**: its `d` is the receipted
+  event's.
+- **keripy's native writer drops a seal of no native type.** An `interact`
+  with a seal such as `{"x": …}` keeps it in the builder's SAD, but the body,
+  its SAID and its signatures leave it out, and a reader sees fewer seals.
+  This reader's writer refuses instead (it only writes to check a SAID).

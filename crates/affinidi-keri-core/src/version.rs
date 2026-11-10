@@ -43,9 +43,8 @@ pub enum SerializationKind {
     Cbor,
     /// MessagePack serialization.
     MsgPack,
-    /// Native CESR serialization (version 2 only). Recognised in version
-    /// strings so it can be refused by name; this crate does not yet read
-    /// native CESR message bodies.
+    /// Native CESR serialization (version 2 only): the body is a CESR group
+    /// of primitives, not a field map.
     Cesr,
 }
 

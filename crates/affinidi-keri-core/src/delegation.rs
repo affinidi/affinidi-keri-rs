@@ -41,20 +41,21 @@ impl DelegationProof {
     /// Build a proof from a seal source couple as parsed from a CESR stream.
     ///
     /// The couple is `(sequence number, SAID)`, both qb64. The sequence number
-    /// is a CESR number primitive, not a decimal string.
+    /// is a CESR number primitive, not a decimal string: a 1.x `Seqner`
+    /// (`0A`), or in 2.x a `Number` in any of its codes (`MAAB`).
     ///
     /// # Errors
     /// Returns `CoreError::ParseError` if either member is malformed, or if the
     /// sequence number does not fit in a `u64`.
     pub fn from_seal_source_couple(sn_qb64: &str, said_qb64: &str) -> Result<Self, CoreError> {
-        let matter = Matter::from_qb64(sn_qb64).map_err(|e| {
+        let raw = crate::native::number_raw(sn_qb64).map_err(|e| {
             CoreError::ParseError(format!("invalid seal source sequence number: {e}"))
         })?;
 
         // CESR number primitives are big-endian, left-padded. Anything set
         // above the low 8 bytes is a sequence number we cannot represent, and
         // silently truncating it would point the check at the wrong event.
-        let raw = matter.raw();
+        let raw = raw.as_slice();
         let (high, low) = raw.split_at(raw.len().saturating_sub(8));
         if high.iter().any(|b| *b != 0) {
             return Err(CoreError::ParseError(

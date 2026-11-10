@@ -73,8 +73,9 @@ pub enum CoreError {
 }
 
 impl CoreError {
-    /// The error for a native CESR message body, which this crate recognises
-    /// but cannot yet read (did:webs on KERI v2, position P8).
+    /// The error this crate returned for a native CESR message body before it
+    /// read them (did:webs on KERI v2, position P8). Nothing here returns it
+    /// now; it is kept so callers that match on it still compile.
     pub fn native_cesr_unsupported() -> Self {
         Self::Unsupported("native CESR bodies not yet supported".into())
     }
