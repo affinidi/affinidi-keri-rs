@@ -35,7 +35,7 @@ pub fn counter_code_for(serder: &Serder, kind: GroupKind) -> Result<&'static str
 }
 
 /// Append `items` as one counted group of `kind`, in `table`'s code and unit.
-fn push_group(
+pub(crate) fn push_group(
     out: &mut Vec<u8>,
     table: CounterTable,
     kind: GroupKind,
@@ -66,7 +66,7 @@ fn push_group(
 /// genus-version counter, so the message declares its own genus wherever it
 /// lands in a stream (a stream with none is read as 1.x, P1), and its groups
 /// are wrapped in an attachment group, as keripy's `clonePreIter` writes them.
-fn frame(serder: &Serder, groups: &[u8]) -> Result<Vec<u8>, CoreError> {
+pub(crate) fn frame(serder: &Serder, groups: &[u8]) -> Result<Vec<u8>, CoreError> {
     let table = table_for(serder);
     let mut out = Vec::with_capacity(serder.size() + groups.len() + 16);
     match table {

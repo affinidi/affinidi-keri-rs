@@ -1,0 +1,72 @@
+{
+  "credentials": [
+    {
+      "acm": {
+        "raw": "{\"v\":\"ACDCCAACAAJSONAAGf.\",\"t\":\"acm\",\"d\":\"EAfPXLzOGXxixPsCLmRyjg_1Z51uAza71GV--f9ypExT\",\"i\":\"EPmxD77Mr1ksEcND7AzR5RHHjj8hdRs_xERWDgGCidBg\",\"rd\":\"EFLPFXurmCT2M2QupRUpMIGu6IwhiQFdw5Aa2q2Co2EW\",\"s\":\"EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA\",\"a\":{\"d\":\"EPFE6ig7TdMQ5MZYyApvPE26OdKZd2S1gFue3jlxgbSZ\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\",\"ids\":[\"did:webs:example.com:EPmxD77Mr1ksEcND7AzR5RHHjj8hdRs_xERWDgGCidBg\"]}}"
+      },
+      "credential": "EAfPXLzOGXxixPsCLmRyjg_1Z51uAza71GV--f9ypExT",
+      "expect": "issued",
+      "registry": "EFLPFXurmCT2M2QupRUpMIGu6IwhiQFdw5Aa2q2Co2EW",
+      "rip": {
+        "anchor": {
+          "said": "ENQKUNS-Lrz6pPqIEz07UT0L-jts3-cPD-oW2TxGMOQg",
+          "sn": 1
+        },
+        "raw": "{\"v\":\"ACDCCAACAAJSONAADa.\",\"t\":\"rip\",\"d\":\"EFLPFXurmCT2M2QupRUpMIGu6IwhiQFdw5Aa2q2Co2EW\",\"u\":\"0AB2dGktcmVnaXN0cnktMDAx\",\"i\":\"EPmxD77Mr1ksEcND7AzR5RHHjj8hdRs_xERWDgGCidBg\",\"n\":\"0\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\"}"
+      },
+      "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+      "updates": [
+        {
+          "anchor": {
+            "said": "ED4RH5bWWoZdMmw1CUpdT4JWzG76muSfj1jwui-UveBh",
+            "sn": 2
+          },
+          "disclosure": {
+            "acdc": "EAfPXLzOGXxixPsCLmRyjg_1Z51uAza71GV--f9ypExT",
+            "blid": "ENGcAm0NhUSAvlJ-4IWtjjfu-7ikTDu6I2OXOn5E2kZg",
+            "state": "issued",
+            "uuid": "aEUlei51nEcGDB4bqi2cDr8Lhc1CyHf1is98eh81IxN_"
+          },
+          "raw": "{\"v\":\"ACDCCAACAAJSONAAEi.\",\"t\":\"bup\",\"d\":\"EL301lNZ3PQSkryNLuUtcHny0rfhlP1Bsm7AjhY8kFsc\",\"rd\":\"EFLPFXurmCT2M2QupRUpMIGu6IwhiQFdw5Aa2q2Co2EW\",\"n\":\"1\",\"p\":\"EFLPFXurmCT2M2QupRUpMIGu6IwhiQFdw5Aa2q2Co2EW\",\"dt\":\"2026-02-02T00:00:00.000000+00:00\",\"b\":\"ENGcAm0NhUSAvlJ-4IWtjjfu-7ikTDu6I2OXOn5E2kZg\"}"
+        }
+      ]
+    },
+    {
+      "acm": {
+        "raw": "{\"v\":\"ACDCCAACAAJSONAAGL.\",\"t\":\"acm\",\"d\":\"ELxYX1TgmM9k2Qe4cajy9XYuhKred34aGy8dpxzPeY5e\",\"i\":\"EPmxD77Mr1ksEcND7AzR5RHHjj8hdRs_xERWDgGCidBg\",\"rd\":\"EO79aaL9xsX_bZ0rHN7dGvL-Yxc1tKg9uUa9iRv_UnHo\",\"s\":\"EIW1ONwnh_dkiDZ3_xmUsBxh7X5u7luVOuCoRdCl3jPZ\",\"a\":{\"d\":\"ENwGSFDGtpQcYV2eJemgDxpbIHOQWauMCxTAGPiINS0_\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\",\"keys\":[\"CPz5wadpRpL4rGHeRSLHIc-2jMndx_mYBhuPhcr7WFRg\"]}}"
+      },
+      "credential": "ELxYX1TgmM9k2Qe4cajy9XYuhKred34aGy8dpxzPeY5e",
+      "expect": "issued",
+      "registry": "EO79aaL9xsX_bZ0rHN7dGvL-Yxc1tKg9uUa9iRv_UnHo",
+      "rip": {
+        "anchor": {
+          "said": "ENQKUNS-Lrz6pPqIEz07UT0L-jts3-cPD-oW2TxGMOQg",
+          "sn": 1
+        },
+        "raw": "{\"v\":\"ACDCCAACAAJSONAADa.\",\"t\":\"rip\",\"d\":\"EO79aaL9xsX_bZ0rHN7dGvL-Yxc1tKg9uUa9iRv_UnHo\",\"u\":\"0AB2dGktcmVnaXN0cnktMDAy\",\"i\":\"EPmxD77Mr1ksEcND7AzR5RHHjj8hdRs_xERWDgGCidBg\",\"n\":\"0\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\"}"
+      },
+      "schema": "EIW1ONwnh_dkiDZ3_xmUsBxh7X5u7luVOuCoRdCl3jPZ",
+      "updates": [
+        {
+          "anchor": {
+            "said": "ED4RH5bWWoZdMmw1CUpdT4JWzG76muSfj1jwui-UveBh",
+            "sn": 2
+          },
+          "disclosure": {
+            "acdc": "ELxYX1TgmM9k2Qe4cajy9XYuhKred34aGy8dpxzPeY5e",
+            "blid": "EOM9sY7CtZjkwYT9bLrDVKDAN2Q0fKlM1v47RTdj2cW6",
+            "state": "issued",
+            "uuid": "aPjooxhsEXYp2t5awb0VPyINK7ooe5IPa3kiGZLCYVPY"
+          },
+          "raw": "{\"v\":\"ACDCCAACAAJSONAAEi.\",\"t\":\"bup\",\"d\":\"EA4_lghL16Q7n59qjPngumd2lwhTRxx4n_HuHq1Qa7bD\",\"rd\":\"EO79aaL9xsX_bZ0rHN7dGvL-Yxc1tKg9uUa9iRv_UnHo\",\"n\":\"1\",\"p\":\"EO79aaL9xsX_bZ0rHN7dGvL-Yxc1tKg9uUa9iRv_UnHo\",\"dt\":\"2026-02-02T00:00:00.000000+00:00\",\"b\":\"EOM9sY7CtZjkwYT9bLrDVKDAN2Q0fKlM1v47RTdj2cW6\"}"
+        }
+      ]
+    }
+  ],
+  "kel": {
+    "prefix": "EPmxD77Mr1ksEcND7AzR5RHHjj8hdRs_xERWDgGCidBg",
+    "said": "ED4RH5bWWoZdMmw1CUpdT4JWzG76muSfj1jwui-UveBh",
+    "sn": 2
+  },
+  "note": "designated aliases and a key agreement designation, each in its own registry; both inceptions anchored in one ixn, both issuances in the next"
+}

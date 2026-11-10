@@ -1,0 +1,41 @@
+{
+  "credentials": [
+    {
+      "acm": {
+        "raw": "{\"v\":\"ACDCCAACAAJSONAAGf.\",\"t\":\"acm\",\"d\":\"EBxfUmi8KPGy0bxb5eWKp_JfQWx5-82NQl3Hn6Dqw-ZG\",\"i\":\"EOfbw_hXF6buychfQNBWyTPZiri9LjSVdkCLk4AEJIDF\",\"rd\":\"EJCjvdStfBuAfoJGx5KBr8eLS6UhRbCww0FbIs4doSIc\",\"s\":\"EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA\",\"a\":{\"d\":\"EAiPQKBIfqi7zIcxkqPzWLZVme3LkXHRxnn6ZxGBVUgx\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\",\"ids\":[\"did:webs:example.com:EOfbw_hXF6buychfQNBWyTPZiri9LjSVdkCLk4AEJIDF\"]}}"
+      },
+      "credential": "EBxfUmi8KPGy0bxb5eWKp_JfQWx5-82NQl3Hn6Dqw-ZG",
+      "expect": "issued",
+      "registry": "EJCjvdStfBuAfoJGx5KBr8eLS6UhRbCww0FbIs4doSIc",
+      "rip": {
+        "anchor": {
+          "said": "EHyCjl9HNmrEtVtmNeygLFZO-KMCokZxkgWH6xWGxQUq",
+          "sn": 1
+        },
+        "raw": "{\"v\":\"ACDCCAACAAJSONAADa.\",\"t\":\"rip\",\"d\":\"EJCjvdStfBuAfoJGx5KBr8eLS6UhRbCww0FbIs4doSIc\",\"u\":\"0AB2dGktcmVnaXN0cnktMDAx\",\"i\":\"EOfbw_hXF6buychfQNBWyTPZiri9LjSVdkCLk4AEJIDF\",\"n\":\"0\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\"}"
+      },
+      "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+      "updates": [
+        {
+          "anchor": {
+            "said": "EDJikdUrazhLgwIpLe9TM4d272EhhkZk3tKt8AWytAkf",
+            "sn": 2
+          },
+          "disclosure": {
+            "acdc": "EBxfUmi8KPGy0bxb5eWKp_JfQWx5-82NQl3Hn6Dqw-ZG",
+            "blid": "EIeP5qsmAVRiAVaCFIVOKsx-iV-Edxd02x-jyENUA6uo",
+            "state": "issued",
+            "uuid": "aKHQrAHUhFv3fRvpPpMTM3Ztrh4OMRwUK1HSgkTpam9H"
+          },
+          "raw": "{\"v\":\"ACDCCAACAAJSONAAEi.\",\"t\":\"bup\",\"d\":\"EJTSBOoCcvd5FS_GZgyCLB6WcERYEA1bHUBIni9O45bz\",\"rd\":\"EJCjvdStfBuAfoJGx5KBr8eLS6UhRbCww0FbIs4doSIc\",\"n\":\"1\",\"p\":\"EJCjvdStfBuAfoJGx5KBr8eLS6UhRbCww0FbIs4doSIc\",\"dt\":\"2026-02-02T00:00:00.000000+00:00\",\"b\":\"EIeP5qsmAVRiAVaCFIVOKsx-iV-Edxd02x-jyENUA6uo\"}"
+        }
+      ]
+    }
+  ],
+  "kel": {
+    "prefix": "EOfbw_hXF6buychfQNBWyTPZiri9LjSVdkCLk4AEJIDF",
+    "said": "EDJikdUrazhLgwIpLe9TM4d272EhhkZk3tKt8AWytAkf",
+    "sn": 2
+  },
+  "note": "rip, acm, bup(issued); each registry event anchored in its own ixn"
+}

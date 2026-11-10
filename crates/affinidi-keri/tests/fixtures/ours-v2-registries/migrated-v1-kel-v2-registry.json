@@ -1,0 +1,41 @@
+{
+  "credentials": [
+    {
+      "acm": {
+        "raw": "{\"v\":\"ACDCCAACAAJSONAAGf.\",\"t\":\"acm\",\"d\":\"ENehZo7Kjwdbg0xJxBsyRkCcDxtD-csh1-xZYDVb9GtR\",\"i\":\"EPor2h7GBxXfdPbYAclADqhd7BSSayUmaXYdmjYU_WZR\",\"rd\":\"EMcN3Okl5ALJyVgVGHVu65GOUzh7imsHyWP8zHLHenWM\",\"s\":\"EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA\",\"a\":{\"d\":\"EI2VJhLaTn4wdmYRfDHEceMnxLpM-dN2Elo9hmEX4yY3\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\",\"ids\":[\"did:webs:example.com:EPor2h7GBxXfdPbYAclADqhd7BSSayUmaXYdmjYU_WZR\"]}}"
+      },
+      "credential": "ENehZo7Kjwdbg0xJxBsyRkCcDxtD-csh1-xZYDVb9GtR",
+      "expect": "issued",
+      "registry": "EMcN3Okl5ALJyVgVGHVu65GOUzh7imsHyWP8zHLHenWM",
+      "rip": {
+        "anchor": {
+          "said": "EAl5rD2nTruLuLURuTlt5vKj1ahHbUUM9VwJ8oS26YLw",
+          "sn": 2
+        },
+        "raw": "{\"v\":\"ACDCCAACAAJSONAADa.\",\"t\":\"rip\",\"d\":\"EMcN3Okl5ALJyVgVGHVu65GOUzh7imsHyWP8zHLHenWM\",\"u\":\"0AB2dGktcmVnaXN0cnktMDAx\",\"i\":\"EPor2h7GBxXfdPbYAclADqhd7BSSayUmaXYdmjYU_WZR\",\"n\":\"0\",\"dt\":\"2026-02-01T00:00:00.000000+00:00\"}"
+      },
+      "schema": "EF9Iy-vwD8GRKghnzHHGwAA6sC0VEWNtZ2Sf4tfd4IAA",
+      "updates": [
+        {
+          "anchor": {
+            "said": "EA0vKrTOz6xpLJfhcJ2K5RBQYYmC--UjniPMDnwaX5X5",
+            "sn": 3
+          },
+          "disclosure": {
+            "acdc": "ENehZo7Kjwdbg0xJxBsyRkCcDxtD-csh1-xZYDVb9GtR",
+            "blid": "EIG-TC1j2QGusLV0gJlc-IgbnpDMbjfy0QIAjMJph7fj",
+            "state": "issued",
+            "uuid": "aLB3tvIB-FrDxut0Ee5F7Uelx-9MCE09WudPIr5hjrkx"
+          },
+          "raw": "{\"v\":\"ACDCCAACAAJSONAAEi.\",\"t\":\"bup\",\"d\":\"EC5j49ZZcJm_g2WLlq2MFOxj7wpc7zf_503BWn4B3-mJ\",\"rd\":\"EMcN3Okl5ALJyVgVGHVu65GOUzh7imsHyWP8zHLHenWM\",\"n\":\"1\",\"p\":\"EMcN3Okl5ALJyVgVGHVu65GOUzh7imsHyWP8zHLHenWM\",\"dt\":\"2026-02-02T00:00:00.000000+00:00\",\"b\":\"EIG-TC1j2QGusLV0gJlc-IgbnpDMbjfy0QIAjMJph7fj\"}"
+        }
+      ]
+    }
+  ],
+  "kel": {
+    "prefix": "EPor2h7GBxXfdPbYAclADqhd7BSSayUmaXYdmjYU_WZR",
+    "said": "EA0vKrTOz6xpLJfhcJ2K5RBQYYmC--UjniPMDnwaX5X5",
+    "sn": 3
+  },
+  "note": "a v1 icp and ixn, then v2 ixn events anchoring a v2 registry and its issuance (P2: a v1 KEL may continue in v2 and anchor a v2 registry)"
+}
