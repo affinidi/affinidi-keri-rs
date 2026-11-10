@@ -1,0 +1,28 @@
+{
+  "note": "rotation signed by R' and K",
+  "expect": "accept",
+  "keripy": {
+    "prefix": "ECBYf9NdgBsQAObIayh3yS5Vig3dqwlU6SNhFf3eov7z",
+    "sn": 2,
+    "said": "EH0wOZjR0tTvd0u7rCfJZhpLw_oJSs5RPvG-_XtRs32F",
+    "ilk": "rot",
+    "version": "2.0",
+    "keys": [
+      "DMZQczdLf7_HLWFoPEKfEa0HOvnSqDd9pO_daymjtEht",
+      "DIUE7YGDrkqXy5VDSrI1y-Cw29olSvYpUER672u73GvU"
+    ],
+    "kt": "1",
+    "n": [
+      "EAaXvAdEskLZiI_J6q6PMC5P1EgsuqPW0eolh0kGecN6",
+      "ECSob5-szFq3P2w6oI4zbMWiYS89Ar5IhcnHGvx8joQS"
+    ],
+    "nt": [
+      "1/2",
+      "1"
+    ],
+    "establishment": {
+      "sn": 2,
+      "said": "EH0wOZjR0tTvd0u7rCfJZhpLw_oJSs5RPvG-_XtRs32F"
+    }
+  }
+}

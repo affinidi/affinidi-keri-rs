@@ -1,0 +1,23 @@
+{
+  "note": "v2 icp then a v1 ixn: P2 refuses a version decrease; keripy's own result is recorded",
+  "expect": "refuse-event-1",
+  "keripy": {
+    "prefix": "EFEfKhdqXQVPIHBz18Vt7bo0D3yx9V7AJrTX9fodvhXg",
+    "sn": 1,
+    "said": "ELprE1-Y1gWnrQF1C-lUvOQ9CLIUwIuhGXV_fkAjMdYu",
+    "ilk": "ixn",
+    "version": "1.0",
+    "keys": [
+      "DE9kcrdEFPqUJo9Lq2gYVTCnreVgREeNyYuHaoK7SSJG"
+    ],
+    "kt": "1",
+    "n": [
+      "EJ8y7BQdjNeynEGrXOQAPYK3jL6kd8gHs40IhT2O5-bQ"
+    ],
+    "nt": "1",
+    "establishment": {
+      "sn": 0,
+      "said": "EFEfKhdqXQVPIHBz18Vt7bo0D3yx9V7AJrTX9fodvhXg"
+    }
+  }
+}

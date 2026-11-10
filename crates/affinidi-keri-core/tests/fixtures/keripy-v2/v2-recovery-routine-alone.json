@@ -1,0 +1,27 @@
+{
+  "note": "rotation signed by R' alone meets kt but not the prior nt: a verifier stops at sn 1",
+  "expect": "refuse-rotation",
+  "keripy": {
+    "prefix": "ECBYf9NdgBsQAObIayh3yS5Vig3dqwlU6SNhFf3eov7z",
+    "sn": 1,
+    "said": "EHhWecw65TYAmfQOShgHL10PSK2hWVUErqmdGALvlY5Z",
+    "ilk": "ixn",
+    "version": "2.0",
+    "keys": [
+      "DMaBY-SKWGexPAVp8UpABvZbE7V3gG3i8idYCEMNTaUJ"
+    ],
+    "kt": "1",
+    "n": [
+      "EIjN25i92I3CFixIZMEyPrzvwG65lMnMo3r6bkas6A8D",
+      "EHhbGZ-MLwRAJv34Zg5MFfWCqaTLNWoiLcRtTXZzupJB"
+    ],
+    "nt": [
+      "1/2",
+      "1"
+    ],
+    "establishment": {
+      "sn": 0,
+      "said": "ECBYf9NdgBsQAObIayh3yS5Vig3dqwlU6SNhFf3eov7z"
+    }
+  }
+}

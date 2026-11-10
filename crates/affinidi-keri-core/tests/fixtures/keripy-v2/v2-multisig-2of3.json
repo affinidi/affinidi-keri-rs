@@ -1,0 +1,27 @@
+{
+  "note": "kt 2 over three keys; icp signed by keys 0 and 2, ixn by 1 and 2",
+  "expect": "accept",
+  "keripy": {
+    "prefix": "EDSWxkioSHZF2GOnRB2gyLmpBL4p5zwC0erzHaeKhpcb",
+    "sn": 1,
+    "said": "EIK-MJWbOqnVNLZwmV0js0iufrz_p5ExiyZ0X5paG6bP",
+    "ilk": "ixn",
+    "version": "2.0",
+    "keys": [
+      "DNuJXyHb_s69JQSau77kpci4twxrp-maRMBTP1b2ty5n",
+      "DKPuI6f_5FYkmrMQozZGzDqIe1N9fx6hXJVF0p7G9Wak",
+      "DEK1lf0aAZhmcqN51Qlc9JeVNZQ35u-L8HSBPCTJ-QGq"
+    ],
+    "kt": "2",
+    "n": [
+      "EPXKgENHE0yq5mYb9TRzGe_wtL8426gSnS3dGqkdA1SW",
+      "EHWxH2jZGjWhXYfzwoAZdkD5cLWo0N_iOiVAij0hUfnk",
+      "EEgQva-zuS48luFtbAaMANuktS6uJx1TyCmquGkYymMs"
+    ],
+    "nt": "2",
+    "establishment": {
+      "sn": 0,
+      "said": "EDSWxkioSHZF2GOnRB2gyLmpBL4p5zwC0erzHaeKhpcb"
+    }
+  }
+}
