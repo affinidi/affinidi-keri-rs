@@ -1,0 +1,27 @@
+{
+  "expect": "accept",
+  "note": "kt 2 over three keys; icp signed by keys 0 and 2, ixn by 1 and 2",
+  "ours": {
+    "establishment": {
+      "said": "EAw9Tz1F-SVoJ-4Py40wxw9qVQ6C0We-rTyDWsKvPIIH",
+      "sn": 0
+    },
+    "ilk": "ixn",
+    "keys": [
+      "DFiJjTm4mPXrKPySnfxLl3Hg23V6ZVsc362Unf7RRl61",
+      "DGsuK0Plc8o29v68ZHz_tMbHy2Esb1iUPclixOAEsrG1",
+      "DM7zuu3Pg_7SkQgzD6j4wob0o5x10CWYQPrY-qQGKb4D"
+    ],
+    "kt": "2",
+    "n": [
+      "EH6NsWhD96m30SD4cQ9Axnm26oK00wfvixV3uQ2g7xOd",
+      "EGi9p72seoqOCUMQSRX37L8Y1Qvoh3d3MT1cONx-NXya",
+      "EOqRipu4ygaALnURJ2EozANBaodHTb1AG6fHuagmLYe8"
+    ],
+    "nt": "2",
+    "prefix": "EAw9Tz1F-SVoJ-4Py40wxw9qVQ6C0We-rTyDWsKvPIIH",
+    "said": "EAjWK_DMObmgERJ9Z-YHXInEbyCFhSDLsLumI89eUQZr",
+    "sn": 1,
+    "version": "2.0"
+  }
+}
