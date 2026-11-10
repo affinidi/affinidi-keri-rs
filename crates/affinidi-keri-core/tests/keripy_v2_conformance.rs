@@ -390,16 +390,41 @@ fn v2_native_delegated() {
         .is_err()
     );
 
-    // TODO(drt): keripy accepts this drt (its state is at sn 1). A 2.x `drt`
-    // has no `di` (fields.rs), but `verify_update_delegated` reads one, so
-    // it is refused, whatever the body's kind. Until that is fixed it must be
-    // refused by name, not accepted with the wrong delegator.
+    // keripy's drt: a rotation's fields, no `di`. The delegator is the one
+    // the dip named, and it anchored this rotation too.
     let drt = &ours[1];
-    assert_eq!(f.keripy["sn"], 1);
-    match kever.verify_update_delegated(&drt.serder, drt.controller_sigs(), &proof(drt), &anchors) {
-        Err(CoreError::Json(e)) if e.to_string().contains("missing field `di`") => {}
-        other => panic!("the drt gap has changed; update this test: {other:?}"),
-    }
+    let mut kever = kever;
+    let state = kever
+        .verify_update_delegated(&drt.serder, drt.controller_sigs(), &proof(drt), &anchors)
+        .expect("keripy's drt verifies");
+    kever.apply_verified_update(state);
+    let s = kever.state();
+    let k = &f.keripy;
+    assert_eq!(s.sn, k["sn"].as_u64().unwrap());
+    assert_eq!(s.last_event_digest, k["said"].as_str().unwrap());
+    assert_eq!(s.said, k["establishment"]["said"].as_str().unwrap());
+    let keys: Vec<&str> = k["keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(s.keys, keys);
+    let next: Vec<&str> = k["n"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(s.next_keys, next);
+    assert_eq!(s.delegator.as_deref(), Some(delegator));
+
+    // The dip's anchor does not authorise the drt.
+    assert!(
+        kever
+            .verify_update_delegated(&drt.serder, drt.controller_sigs(), &proof(dip), &anchors)
+            .is_err()
+    );
 }
 
 #[test]

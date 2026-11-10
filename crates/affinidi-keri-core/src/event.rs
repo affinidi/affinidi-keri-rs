@@ -196,8 +196,10 @@ pub struct DelegatedInceptionEvent {
 
 /// Delegated rotation event body.
 ///
-/// Same as rotation but with an additional `di` field for the delegator prefix.
-/// Field order: v, t, d, i, s, p, kt, k, nt, n, bt, br, ba, c, a, di
+/// The fields of a rotation. It names no delegator: as in keripy, the
+/// delegator is the one the identifier was incepted under (`dip`'s `di`),
+/// and a `drt` carrying `di` is refused.
+/// Field order: v, t, d, i, s, p, kt, k, nt, n, bt, br, ba, c (2.x), a
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelegatedRotationEvent {
     /// Version string.
@@ -239,15 +241,13 @@ pub struct DelegatedRotationEvent {
     /// Witnesses to add.
     #[serde(rename = "ba")]
     pub backers_add: Vec<String>,
-    /// Configuration traits.
-    #[serde(rename = "c")]
+    /// Configuration traits. A version 1 `drt` has no `c` field, and is read
+    /// with this empty and written without it.
+    #[serde(rename = "c", default, skip_serializing_if = "Vec::is_empty")]
     pub config: Vec<String>,
     /// Anchored data seals.
     #[serde(rename = "a")]
     pub anchors: Vec<crate::sad::SadValue>,
-    /// Delegator identifier prefix.
-    #[serde(rename = "di")]
-    pub delegator: String,
 }
 
 /// Receipt event body.

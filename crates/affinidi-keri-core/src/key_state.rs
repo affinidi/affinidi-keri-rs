@@ -321,20 +321,12 @@ impl KeyState {
                 "delegated rotation applied to an identifier that was not delegated".into(),
             ));
         }
-        match self.delegator.as_deref() {
-            Some(known) if known == event.delegator => {}
-            Some(known) => {
-                return Err(CoreError::Validation(format!(
-                    "delegated rotation names delegator '{}' but the identifier was \
-                     incepted under '{known}'",
-                    event.delegator,
-                )));
-            }
-            None => {
-                return Err(CoreError::Validation(
-                    "delegated identifier has no recorded delegator".into(),
-                ));
-            }
+        // The delegator is the one named at inception; a `drt` cannot name
+        // another (it has no `di`).
+        if self.delegator.is_none() {
+            return Err(CoreError::Validation(
+                "delegated identifier has no recorded delegator".into(),
+            ));
         }
 
         // The delegation-specific checks above are the only difference; the

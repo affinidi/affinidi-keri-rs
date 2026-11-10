@@ -68,13 +68,24 @@ fn delegated_inception(current: &Signer, next: &Signer, delegator: &str) -> Serd
     Serder::new(SerializationKind::Json, sad).expect("serder")
 }
 
+/// A version 1 `drt` as keripy writes it: a rotation's fields, no `c`, no `di`.
 fn delegated_rotation(
     prefix: &str,
     sn: u64,
     prior: &str,
     current: &Signer,
     next: &Signer,
-    delegator: &str,
+) -> Serder {
+    delegated_rotation_with(prefix, sn, prior, current, next, |_| {})
+}
+
+fn delegated_rotation_with(
+    prefix: &str,
+    sn: u64,
+    prior: &str,
+    current: &Signer,
+    next: &Signer,
+    amend: impl FnOnce(&mut affinidi_keri_core::SadValue),
 ) -> Serder {
     let mut sad = affinidi_keri_core::sad!({
         "v": "KERI10JSON000000_",
@@ -90,10 +101,9 @@ fn delegated_rotation(
         "bt": "0",
         "br": [],
         "ba": [],
-        "c": [],
         "a": [],
-        "di": delegator,
     });
+    amend(&mut sad);
     fix_version_string(&mut sad);
     said::compute_said(&mut sad, "d", "E", SerializationKind::Json).expect("said");
     Serder::new(SerializationKind::Json, sad).expect("serder")
@@ -257,14 +267,7 @@ fn anchored_delegated_rotation_verifies() {
         Kever::new_delegated(&dip, &sign(&dip, &cur), &verfers(&cur), &proof(), &source)
             .expect("inception verifies");
 
-    let drt = delegated_rotation(
-        &prefix,
-        1,
-        &kever.state().last_event_digest,
-        &next,
-        &after,
-        DELEGATOR,
-    );
+    let drt = delegated_rotation(&prefix, 1, &kever.state().last_event_digest, &next, &after);
     let rot_source = Delegator::anchoring(&prefix, 1, &drt.said().expect("said"));
     let state = kever
         .verify_update_delegated(&drt, &sign(&drt, &next), &proof(), &rot_source)
@@ -290,14 +293,7 @@ fn unanchored_delegated_rotation_is_rejected() {
     let kever = Kever::new_delegated(&dip, &sign(&dip, &cur), &verfers(&cur), &proof(), &source)
         .expect("inception verifies");
 
-    let drt = delegated_rotation(
-        &prefix,
-        1,
-        &kever.state().last_event_digest,
-        &next,
-        &after,
-        DELEGATOR,
-    );
+    let drt = delegated_rotation(&prefix, 1, &kever.state().last_event_digest, &next, &after);
     // Only the inception is anchored. A delegator that approved the inception
     // has not thereby approved every rotation that follows it.
     assert!(
@@ -308,7 +304,7 @@ fn unanchored_delegated_rotation_is_rejected() {
 }
 
 #[test]
-fn delegated_rotation_under_a_different_delegator_is_rejected() {
+fn a_drt_naming_a_delegator_is_refused() {
     let (cur, next, after) = (signer(1), signer(2), signer(3));
     let dip = delegated_inception(&cur, &next, DELEGATOR);
     let prefix = dip.prefix().expect("prefix");
@@ -317,22 +313,44 @@ fn delegated_rotation_under_a_different_delegator_is_rejected() {
     let kever = Kever::new_delegated(&dip, &sign(&dip, &cur), &verfers(&cur), &proof(), &source)
         .expect("inception verifies");
 
-    // A rotation that swaps the delegator is an attempt to move control out
-    // from under the original delegator, not a rotation.
-    let usurper = "EUsurper0000000000000000000000000000000000AB";
-    let drt = delegated_rotation(
+    // A `drt` has no `di`: the delegator is the one named at inception, and
+    // a rotation cannot move control to another. keripy refuses the field,
+    // whichever delegator it names; so do we.
+    for named in [DELEGATOR, "EUsurper0000000000000000000000000000000000AB"] {
+        let drt = delegated_rotation_with(
+            &prefix,
+            1,
+            &kever.state().last_event_digest,
+            &next,
+            &after,
+            |sad| {
+                sad.insert("di", affinidi_keri_core::SadValue::String(named.into()));
+            },
+        );
+        let rot_source = Delegator::anchoring(&prefix, 1, &drt.said().expect("said"));
+        let err = kever
+            .verify_update_delegated(&drt, &sign(&drt, &next), &proof(), &rot_source)
+            .expect_err("a drt carrying di must be refused");
+        assert!(err.to_string().contains("di"), "{err}");
+    }
+
+    // Nor does a version 1 `drt` carry `c`.
+    let drt = delegated_rotation_with(
         &prefix,
         1,
         &kever.state().last_event_digest,
         &next,
         &after,
-        usurper,
+        |sad| {
+            sad.insert("c", affinidi_keri_core::SadValue::Array(vec![]));
+        },
     );
     let rot_source = Delegator::anchoring(&prefix, 1, &drt.said().expect("said"));
-    let err = kever
-        .verify_update_delegated(&drt, &sign(&drt, &next), &proof(), &rot_source)
-        .expect_err("changing delegator mid-KEL must be refused");
-    assert!(err.to_string().contains("incepted under"), "{err}");
+    assert!(
+        kever
+            .verify_update_delegated(&drt, &sign(&drt, &next), &proof(), &rot_source)
+            .is_err()
+    );
 }
 
 #[test]
@@ -345,14 +363,7 @@ fn a_drt_is_refused_by_the_plain_update_path() {
     let kever = Kever::new_delegated(&dip, &sign(&dip, &cur), &verfers(&cur), &proof(), &source)
         .expect("inception verifies");
 
-    let drt = delegated_rotation(
-        &prefix,
-        1,
-        &kever.state().last_event_digest,
-        &next,
-        &after,
-        DELEGATOR,
-    );
+    let drt = delegated_rotation(&prefix, 1, &kever.state().last_event_digest, &next, &after);
     let err = kever
         .verify_update(&drt, &sign(&drt, &next))
         .expect_err("plain update must refuse a drt");
@@ -379,7 +390,6 @@ fn a_delegated_rotation_still_honours_the_pre_rotation_commitment() {
         &kever.state().last_event_digest,
         &uncommitted,
         &after,
-        DELEGATOR,
     );
     let rot_source = Delegator::anchoring(&prefix, 1, &drt.said().expect("said"));
     assert!(
