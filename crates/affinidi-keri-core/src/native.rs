@@ -919,20 +919,33 @@ fn read_group<'a>(
 const GENERIC_MAP: char = 'I';
 const GENERIC_LIST: char = 'J';
 
+/// How deeply field maps and lists may nest: serde_json's limit, so a native
+/// body is held to what a JSON one is. A stream is untrusted input, and each
+/// level costs a stack frame.
+const MAX_DEPTH: usize = 128;
+
 /// keripy `Mapper._deserialize`.
-fn read_value(buf: &[u8], strict: bool) -> Result<(SadValue, &[u8]), CoreError> {
+fn read_value(buf: &[u8], strict: bool, depth: usize) -> Result<(SadValue, &[u8]), CoreError> {
     if buf.first() == Some(&b'-') {
+        if depth >= MAX_DEPTH {
+            return Err(err(format!(
+                "field maps and lists nest deeper than {MAX_DEPTH}"
+            )));
+        }
         let (selector, mut content, rest) = read_group(buf, &[GENERIC_MAP, GENERIC_LIST])?;
         if selector == GENERIC_LIST {
             let mut items = Vec::new();
             while !content.is_empty() {
-                let (v, r) = read_value(content, strict)?;
+                let (v, r) = read_value(content, strict, depth + 1)?;
                 items.push(v);
                 content = r;
             }
             return Ok((SadValue::Array(items), rest));
         }
-        return Ok((SadValue::Object(read_map_content(content, strict)?), rest));
+        return Ok((
+            SadValue::Object(read_map_content(content, strict, depth + 1)?),
+            rest,
+        ));
     }
     let (m, n) = read_matter(buf)?;
     let rest = &buf[n..];
@@ -951,11 +964,11 @@ fn read_value(buf: &[u8], strict: bool) -> Result<(SadValue, &[u8]), CoreError> 
     Ok((value, rest))
 }
 
-fn read_map_content(mut content: &[u8], strict: bool) -> Result<SadMap, CoreError> {
+fn read_map_content(mut content: &[u8], strict: bool, depth: usize) -> Result<SadMap, CoreError> {
     let mut map = SadMap::new();
     while !content.is_empty() {
         let (label, rest) = read_label(content, strict)?;
-        let (value, rest) = read_value(rest, strict)?;
+        let (value, rest) = read_value(rest, strict, depth)?;
         map.insert(label, value);
         content = rest;
     }
@@ -965,7 +978,10 @@ fn read_map_content(mut content: &[u8], strict: bool) -> Result<SadMap, CoreErro
 /// keripy `Mapper(qb64b=)`: a whole field map group.
 fn read_map(buf: &[u8], strict: bool) -> Result<(SadValue, &[u8]), CoreError> {
     let (_, content, rest) = read_group(buf, &[GENERIC_MAP])?;
-    Ok((SadValue::Object(read_map_content(content, strict)?), rest))
+    Ok((
+        SadValue::Object(read_map_content(content, strict, 1)?),
+        rest,
+    ))
 }
 
 /// keripy `Decimer.decimal`: an int if it reads as one, else a float.
@@ -1646,5 +1662,27 @@ mod tests {
         let (n, _) = read_number(long.as_bytes()).unwrap();
         assert_eq!(n, "1");
         assert_ne!(encode_number(&n).unwrap(), long);
+    }
+
+    #[test]
+    fn nesting_past_the_limit_is_refused_not_a_stack_overflow() {
+        // A field map holding `{"a": [[[ … ]]]}`, nested far past MAX_DEPTH.
+        let mut inner = String::new();
+        for _ in 0..10_000 {
+            inner = enclose(GENERIC_LIST, &inner).unwrap();
+        }
+        let body = format!("{}{inner}", encode_text("a").unwrap());
+        let map = enclose(GENERIC_MAP, &body).unwrap();
+        let e = read_map(map.as_bytes(), true).unwrap_err();
+        assert!(e.to_string().contains("nest deeper"), "{e}");
+
+        // Within the limit it reads.
+        let mut inner = String::new();
+        for _ in 0..(MAX_DEPTH - 2) {
+            inner = enclose(GENERIC_LIST, &inner).unwrap();
+        }
+        let body = format!("{}{inner}", encode_text("a").unwrap());
+        let map = enclose(GENERIC_MAP, &body).unwrap();
+        read_map(map.as_bytes(), true).unwrap();
     }
 }
