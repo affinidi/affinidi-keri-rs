@@ -42,9 +42,7 @@
 
 use std::collections::BTreeMap;
 
-use affinidi_cesr::Counter;
-use affinidi_keri_core::composer::counter_code_for;
-use affinidi_keri_core::counter_table::GroupKind;
+use affinidi_keri_core::composer::compose_event;
 use affinidi_keri_core::said;
 use affinidi_keri_core::serder::Serder;
 use affinidi_keri_core::threshold::{Threshold, ThresholdValue};
@@ -55,6 +53,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::KeriError;
 use crate::hab::{SignedEvent, fix_version_string};
+use crate::protocol::ProtocolVersion;
 
 /// A signing key held outside this library.
 ///
@@ -134,6 +133,9 @@ pub struct Inception {
     pub backer_threshold: usize,
     /// Configuration traits, such as `EO` (establishment only).
     pub config_traits: Vec<String>,
+    /// The protocol version the identifier's log is written in: version 2
+    /// unless set.
+    pub version: ProtocolVersion,
 }
 
 impl Inception {
@@ -152,6 +154,7 @@ impl Inception {
             backers: Vec::new(),
             backer_threshold: 0,
             config_traits: Vec::new(),
+            version: ProtocolVersion::V2,
         }
     }
 
@@ -165,6 +168,12 @@ impl Inception {
     /// Set the configuration traits.
     pub fn with_config_traits(mut self, traits: Vec<String>) -> Self {
         self.config_traits = traits;
+        self
+    }
+
+    /// Write the log in `version` instead of version 2.
+    pub fn with_version(mut self, version: ProtocolVersion) -> Self {
+        self.version = version;
         self
     }
 }
@@ -246,6 +255,10 @@ pub struct ControllerState {
     pub backers: Vec<String>,
     /// Witness threshold.
     pub backer_threshold: usize,
+    /// The protocol version the next event is written in. A state persisted
+    /// before 0.6 names none, and its log is version 1.
+    #[serde(default = "ProtocolVersion::legacy")]
+    pub version: ProtocolVersion,
 }
 
 /// What a pending event's signatures must satisfy.
@@ -360,11 +373,14 @@ impl PendingEvent {
             .collect();
         let raw = self.raw.into_bytes();
         let serder = Serder::from_raw(&raw)?;
-        let code = counter_code_for(&serder, GroupKind::ControllerIdxSigs)?;
-        let counter = Counter::new(code, self.signatures.len())?.qb64()?;
-        let mut composed = raw.clone();
-        composed.extend_from_slice(counter.as_bytes());
-        composed.extend_from_slice(&sig_bytes);
+        let sigers = self
+            .signatures
+            .values()
+            .map(|s| Siger::from_qb64(s))
+            .collect::<Result<Vec<_>, _>>()?;
+        // Framed in the event's own version: a version 2 event opens with the
+        // genus counter and carries its signatures in an attachment group.
+        let composed = compose_event(&serder, &sigers)?;
         Ok((
             SignedEvent {
                 said: self.said,
@@ -471,7 +487,7 @@ pub fn incept(inception: &Inception) -> Result<PendingEvent, KeriError> {
         )));
     }
     let sad = affinidi_keri_core::sad!({
-        "v": "KERI10JSON000000_",
+        "v": inception.version.placeholder(),
         "t": "icp",
         "d": "",
         "i": "",
@@ -507,11 +523,27 @@ pub fn incept(inception: &Inception) -> Result<PendingEvent, KeriError> {
             next_threshold: inception.next_threshold.clone().into(),
             backers: inception.backers.clone(),
             backer_threshold: inception.backer_threshold,
+            version: inception.version,
         },
     })
 }
 
 impl ControllerState {
+    /// The same state, with every later event written in `version`.
+    ///
+    /// A log may move up a version (a version 1 log continued in version 2)
+    /// but never down.
+    ///
+    /// # Errors
+    /// Returns [`KeriError::Config`] if `version` is below the log's current
+    /// version.
+    pub fn upgrade(&self, version: ProtocolVersion) -> Result<Self, KeriError> {
+        version.check_from(self.version)?;
+        let mut next = self.clone();
+        next.version = version;
+        Ok(next)
+    }
+
     /// Build a rotation that installs `keys`, the successors the latest
     /// establishment event committed to, all of them and in that order.
     ///
@@ -558,24 +590,44 @@ impl ControllerState {
         }
 
         let sn = self.sn + 1;
-        let sad = affinidi_keri_core::sad!({
-            "v": "KERI10JSON000000_",
-            "t": "rot",
-            "d": "",
-            "i": self.prefix,
-            "s": format!("{sn:x}"),
-            "p": self.last_said,
-            "kt": threshold_sad(&rotation.threshold),
-            "k": keys,
-            "nt": threshold_sad(&rotation.next_threshold),
-            "n": next,
-            "bt": format!("{:x}", backer_threshold),
-            "br": rotation.backers_remove,
-            "ba": rotation.backers_add,
+        let sad = match self.version {
             // A version 1 `rot` has no `c` field; keripy refuses one that
             // carries it ("Invalid top level field list").
-            "a": []
-        });
+            ProtocolVersion::V1 => affinidi_keri_core::sad!({
+                "v": self.version.placeholder(),
+                "t": "rot",
+                "d": "",
+                "i": self.prefix,
+                "s": format!("{sn:x}"),
+                "p": self.last_said,
+                "kt": threshold_sad(&rotation.threshold),
+                "k": keys,
+                "nt": threshold_sad(&rotation.next_threshold),
+                "n": next,
+                "bt": format!("{:x}", backer_threshold),
+                "br": rotation.backers_remove,
+                "ba": rotation.backers_add,
+                "a": []
+            }),
+            // Version 2 adds `c` after `ba` (keripy serdering.py, v2 `rot`).
+            ProtocolVersion::V2 => affinidi_keri_core::sad!({
+                "v": self.version.placeholder(),
+                "t": "rot",
+                "d": "",
+                "i": self.prefix,
+                "s": format!("{sn:x}"),
+                "p": self.last_said,
+                "kt": threshold_sad(&rotation.threshold),
+                "k": keys,
+                "nt": threshold_sad(&rotation.next_threshold),
+                "n": next,
+                "bt": format!("{:x}", backer_threshold),
+                "br": rotation.backers_remove,
+                "ba": rotation.backers_add,
+                "c": [],
+                "a": []
+            }),
+        };
         let (said, raw) = saidify(sad)?;
         Ok(PendingEvent {
             said: said.clone(),
@@ -603,6 +655,7 @@ impl ControllerState {
                 next_threshold: rotation.next_threshold.clone().into(),
                 backers,
                 backer_threshold,
+                version: self.version,
             },
         })
     }
@@ -615,7 +668,7 @@ impl ControllerState {
     pub fn interact(&self, anchors: &[SadValue]) -> Result<PendingEvent, KeriError> {
         let sn = self.sn + 1;
         let sad = affinidi_keri_core::sad!({
-            "v": "KERI10JSON000000_",
+            "v": self.version.placeholder(),
             "t": "ixn",
             "d": "",
             "i": self.prefix,

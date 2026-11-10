@@ -79,9 +79,20 @@ pub(crate) fn fix_version_string(sad: &mut affinidi_keri_core::SadValue) -> Resu
         sad["i"] = affinidi_keri_core::SadValue::String(placeholder);
     }
 
+    // The version string already in `v` says which version this event is;
+    // each version's string has a fixed length, so sizing with it in place is
+    // exact.
+    let mut version = sad
+        .get("v")
+        .and_then(|v| v.as_str())
+        .map(affinidi_keri_core::version::Version::parse_str)
+        .transpose()?
+        .ok_or_else(|| KeriError::Config("event has no version string".into()))?;
+
     let temp_raw = serde_json::to_vec(sad)
         .map_err(|e| KeriError::Core(affinidi_keri_core::CoreError::Json(e)))?;
-    sad["v"] = affinidi_keri_core::SadValue::String(format!("KERI10JSON{:06x}_", temp_raw.len()));
+    version.size = temp_raw.len();
+    sad["v"] = affinidi_keri_core::SadValue::String(version.to_version_string());
 
     // Restore originals for compute_said
     sad["d"] = orig_d;
