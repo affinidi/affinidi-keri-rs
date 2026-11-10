@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-11
+
+Native CESR bodies (P8), keripy's delegated rotation, and the `EO` and `DND`
+configuration traits. Checked against keripy 2.1.0-dev1 (b70986f) with new
+keripy fixtures.
+
+### Changed (breaking)
+
+- **A delegated rotation names no delegator**, as keripy's `drt`: it carries
+  a rotation's fields and no `di` (in 1.x, no `c` either), and the delegator is
+  the one the `dip` named. `DelegatedRotationEvent::delegator` is removed and
+  `c` is optional on read. `Kever::verify_update_delegated` checks keripy's
+  field list, refusing `di`, and verifies the anchor against the delegator
+  recorded at inception. keripy's delegated rotations were refused before.
+- **`EO` and `DND` are enforced** (KERI spec, Configuration traits field): an
+  establishment-only identifier's interaction events are refused, and so is a
+  delegated event whose delegator has `DND`, though anchored. `EO`, `DND` and
+  `DID` are inception-only: a version 2 rotation's `c` no longer adds them
+  (keripy ignores them there).
+- **`DelegatorAnchors` has a new required method, `delegator_traits`**: the
+  delegator's verified configuration traits. It has no default, so an
+  implementation cannot fail open.
+
+### Added
+
+- **Native CESR message bodies are read (P8)**, keripy's default kind: every
+  KERI message type and the ACDC registry, section and field-map messages,
+  decoded to the SAD keripy reads, accepted only in keripy's canonical
+  encoding, with SAIDs verified over the native body. Field-map and list
+  nesting is bounded at 128. An expanded aggregate section (`A`) is refused as
+  unsupported. Native bodies are not written.
+- The kind is taken from the message throughout (`Kever::new_from_parts`,
+  `verify_update_owned`, the registry reader), not assumed to be JSON.
+- Keripy fixtures `v2-native-recovery`, `v2-native-delegated`,
+  `v2-native-messages`, `v2-issued-native`, `v2-revoked-native`,
+  `v2-eo-interaction`, `v2-eo-rotation`, `v2-eo-in-rotation`,
+  `v2-dnd-delegator`.
+
+### Fixed
+
+- `DelegationProof::from_seal_source_couple` reads any CESR number, so a 2.x
+  delegated event's `MAAB` anchor parses.
+- Threshold weights are bounded to 0..1, as keripy bounds them.
+
 ## [0.7.0] - 2026-11-10
 
 Rotations as keripy verifies them, and superseding recovery. Checked against
