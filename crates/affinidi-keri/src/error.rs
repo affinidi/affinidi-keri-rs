@@ -11,6 +11,8 @@ pub enum KeriError {
     #[error("core error: {0}")]
     Core(#[from] affinidi_keri_core::CoreError),
 
+    /// A store failed. Only with the `store` feature.
+    #[cfg(feature = "store")]
     #[error("database error: {0}")]
     Db(#[from] affinidi_keri_db::DbError),
 

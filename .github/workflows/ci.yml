@@ -43,6 +43,25 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-targets --no-fail-fast
 
+  # `affinidi-keri` without its LMDB-backed store: what a did:webs controller
+  # depends on. It must build, lint and test with no database in its tree.
+  no-store:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p affinidi-keri --no-default-features --all-targets -- -D warnings
+      - run: cargo test -p affinidi-keri --no-default-features --all-targets --no-fail-fast
+      - name: No database in the tree
+        run: |
+          if cargo tree -p affinidi-keri --no-default-features -e normal | grep -E 'heed|lmdb|affinidi-keri-db'; then
+            echo "affinidi-keri without 'store' must not depend on a database" >&2
+            exit 1
+          fi
+
   # Every crate is published on its own, so every crate must build on its own.
   # A workspace build unifies features across members and would hide a missing
   # dependency in exactly the crate that is about to be published.

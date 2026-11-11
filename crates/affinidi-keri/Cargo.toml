@@ -17,20 +17,54 @@ readme = "README.md"
 affinidi-cesr = { workspace = true }
 affinidi-keri-crypto = { workspace = true }
 affinidi-keri-core = { workspace = true }
-affinidi-keri-db = { workspace = true }
+affinidi-keri-db = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+[features]
+# The LMDB-backed store (`affinidi-keri-db`, which builds LMDB through `heed`):
+# `Habery`, direct mode, the `Judge`, and the `Hab` operations that write to a
+# store. Off, the crate is the controller (`controller`) and the store-free
+# `Hab` (`*_event`, `resume`), with no C dependency: a `did:webs` controller
+# keeps its key event log in `keri.cesr`, not a database.
+default = ["store"]
+store = ["dep:affinidi-keri-db"]
 
 [dev-dependencies]
 hex = { workspace = true }
 tempfile = { workspace = true }
 criterion = { workspace = true }
 
+[[test]]
+name = "resume"
+required-features = ["store"]
+
+[[test]]
+name = "witness_integration"
+required-features = ["store"]
+
+[[example]]
+name = "bench_history"
+required-features = ["store"]
+
+[[example]]
+name = "demo_credential"
+required-features = ["store"]
+
+[[example]]
+name = "demo_judge"
+required-features = ["store"]
+
+[[example]]
+name = "demo_witness"
+required-features = ["store"]
+
 [[bench]]
 name = "kel_benchmarks"
 harness = false
+required-features = ["store"]
 
 [lints]
 workspace = true
