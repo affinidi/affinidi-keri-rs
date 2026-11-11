@@ -11,6 +11,7 @@ use affinidi_keri_core::said;
 use affinidi_keri_core::serder::Serder;
 use affinidi_keri_core::version::SerializationKind;
 use affinidi_keri_crypto::{Cigar, Diger, Salter, Signer};
+#[cfg(feature = "store")]
 use affinidi_keri_db::KeriStore;
 use serde::{Deserialize, Serialize};
 
@@ -188,18 +189,56 @@ pub struct SignedEvent {
     pub composed: Vec<u8>,
 }
 
+/// What a store-backed operation writes, handed to it before the [`Hab`]'s own
+/// state moves, so a failed write leaves the identifier where it was.
+// Without `store` nothing persists, so nothing reads the fields.
+#[cfg_attr(not(feature = "store"), allow(dead_code))]
+struct Write<'a> {
+    said: &'a str,
+    raw: &'a [u8],
+    prefix: &'a str,
+    sn: u64,
+    signatures: &'a [u8],
+    /// The identifier's name and resumable metadata, written with its
+    /// inception.
+    hab: Option<(&'a str, &'a [u8])>,
+}
+
+/// Persists a [`Write`]. Only the store-backed constructors pass one, so a
+/// build without the `store` feature names no database type.
+type Persist<'a> = Option<&'a dyn Fn(&Write<'_>) -> Result<(), KeriError>>;
+
+#[cfg(feature = "store")]
+fn into_store(store: &dyn KeriStore, w: &Write<'_>) -> Result<(), KeriError> {
+    match w.hab {
+        Some((name, hab)) => store.store_event_with_hab(
+            w.said,
+            w.raw,
+            w.prefix,
+            w.sn,
+            Some(w.signatures),
+            name,
+            hab,
+        )?,
+        None => store.store_event(w.said, w.raw, w.prefix, w.sn, Some(w.signatures))?,
+    }
+    Ok(())
+}
+
 impl Hab {
     /// Create a new identifier via inception.
     ///
     /// Generates signing keys and next keys, builds the inception event,
     /// computes its SAID, signs it, stores everything in the database,
     /// and returns the Hab along with the composed message bytes.
+    #[cfg(feature = "store")]
     pub fn incept(
         name: &str,
         config: &InceptionConfig,
         store: &dyn KeriStore,
     ) -> Result<(Self, Vec<u8>), KeriError> {
-        let (hab, event) = Self::incept_inner(name, config, Some(store))?;
+        let persist = |w: &Write<'_>| into_store(store, w);
+        let (hab, event) = Self::incept_inner(name, config, Some(&persist))?;
         Ok((hab, event.composed))
     }
 
@@ -221,7 +260,7 @@ impl Hab {
     fn incept_inner(
         name: &str,
         config: &InceptionConfig,
-        store: Option<&dyn KeriStore>,
+        persist: Persist<'_>,
     ) -> Result<(Self, SignedEvent), KeriError> {
         // Build salter from config or generate random
         let salter = if let Some(ref salt) = config.salt {
@@ -319,16 +358,15 @@ impl Hab {
         });
         let hab_bytes =
             serde_json::to_vec(&hab_data).map_err(|e| KeriError::Config(e.to_string()))?;
-        if let Some(store) = store {
-            store.store_event_with_hab(
-                &computed_said,
-                serder.raw(),
-                &prefix,
-                0,
-                Some(&sig_bytes),
-                name,
-                &hab_bytes,
-            )?;
+        if let Some(persist) = persist {
+            persist(&Write {
+                said: &computed_said,
+                raw: serder.raw(),
+                prefix: &prefix,
+                sn: 0,
+                signatures: &sig_bytes,
+                hab: Some((name, &hab_bytes)),
+            })?;
         }
 
         let hab = Hab {
@@ -365,12 +403,15 @@ impl Hab {
     /// Generates new signing keys and next keys, builds the rotation event,
     /// signs it with the CURRENT signers, updates internal state, stores
     /// everything, and returns the composed message.
+    #[cfg(feature = "store")]
     pub fn rotate(
         &mut self,
         config: &RotationConfig,
         store: &dyn KeriStore,
     ) -> Result<Vec<u8>, KeriError> {
-        self.rotate_inner(config, Some(store)).map(|e| e.composed)
+        let persist = |w: &Write<'_>| into_store(store, w);
+        self.rotate_inner(config, Some(&persist))
+            .map(|e| e.composed)
     }
 
     /// Rotate without a store, returning the signed event.
@@ -385,7 +426,7 @@ impl Hab {
     fn rotate_inner(
         &mut self,
         config: &RotationConfig,
-        store: Option<&dyn KeriStore>,
+        persist: Persist<'_>,
     ) -> Result<SignedEvent, KeriError> {
         if !self.transferable {
             return Err(KeriError::Config(
@@ -484,14 +525,15 @@ impl Hab {
         let (sig_bytes, composed) = sign_and_compose(&serder, &new_signers)?;
 
         // Store event, KEL, first-seen, signatures in one transaction
-        if let Some(store) = store {
-            store.store_event(
-                &computed_said,
-                serder.raw(),
-                &self.prefix,
-                new_sn,
-                Some(&sig_bytes),
-            )?;
+        if let Some(persist) = persist {
+            persist(&Write {
+                said: &computed_said,
+                raw: serder.raw(),
+                prefix: &self.prefix,
+                sn: new_sn,
+                signatures: &sig_bytes,
+                hab: None,
+            })?;
         }
 
         // Update internal state
@@ -614,12 +656,14 @@ impl Hab {
     ///
     /// Interaction events do not change keys -- they only anchor data
     /// (seals) into the KEL.
+    #[cfg(feature = "store")]
     pub fn interact(
         &mut self,
         anchors: &[affinidi_keri_core::SadValue],
         store: &dyn KeriStore,
     ) -> Result<Vec<u8>, KeriError> {
-        self.interact_inner(anchors, Some(store))
+        let persist = |w: &Write<'_>| into_store(store, w);
+        self.interact_inner(anchors, Some(&persist))
             .map(|e| e.composed)
     }
 
@@ -637,7 +681,7 @@ impl Hab {
     fn interact_inner(
         &mut self,
         anchors: &[affinidi_keri_core::SadValue],
-        store: Option<&dyn KeriStore>,
+        persist: Persist<'_>,
     ) -> Result<SignedEvent, KeriError> {
         let new_sn = self.sn + 1;
 
@@ -665,14 +709,15 @@ impl Hab {
         let (sig_bytes, composed) = sign_and_compose(&serder, &self.signers)?;
 
         // Store event, KEL, first-seen, signatures in one transaction
-        if let Some(store) = store {
-            store.store_event(
-                &computed_said,
-                serder.raw(),
-                &self.prefix,
-                new_sn,
-                Some(&sig_bytes),
-            )?;
+        if let Some(persist) = persist {
+            persist(&Write {
+                said: &computed_said,
+                raw: serder.raw(),
+                prefix: &self.prefix,
+                sn: new_sn,
+                signatures: &sig_bytes,
+                hab: None,
+            })?;
         }
 
         // Update state
@@ -733,6 +778,7 @@ impl Hab {
     ///
     /// Constructs a receipt event body (with SAID), appends the receipt
     /// attachment from `receipt()`, and stores the receipt via the store.
+    #[cfg(feature = "store")]
     pub fn receipt_message(
         &self,
         other_serder: &Serder,
@@ -856,7 +902,8 @@ impl Hab {
     }
 }
 
-#[cfg(test)]
+// The store-backed paths, against LMDB.
+#[cfg(all(test, feature = "store"))]
 mod tests {
     use super::*;
     use affinidi_keri_core::parser;
