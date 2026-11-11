@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-11
+
+### Added
+
+- **`affinidi-keri`'s LMDB store is an optional feature, `store`**, on by
+  default. Without it the crate is the controller (`controller`) and the
+  store-free `Hab` (`*_event`, `resume`), and depends on no database: a
+  `did:webs` controller keeps its key event log in `keri.cesr`, so it no
+  longer compiles LMDB (`heed`). `store` gates `affinidi-keri-db`, `Habery`,
+  direct mode, the `Judge`, `KeriError::Db` and the `Hab` operations that
+  write to a store. CI builds, lints and tests the crate without it, and fails
+  if a database reaches its tree. Nothing changes for a default build.
+
 ## [0.8.0] - 2026-11-11
 
 Native CESR bodies (P8), keripy's delegated rotation, and the `EO` and `DND`
