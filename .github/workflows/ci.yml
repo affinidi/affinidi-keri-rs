@@ -101,6 +101,10 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Kept in step with deny.toml's [advisories] ignore list: chrono
+          # "unmaintained", accepted 2026-11-17 (no vulnerability, no fixed
+          # release). Without this, audit-check files an issue for it.
+          ignore: RUSTSEC-2026-0543
 
   deny:
     runs-on: ubuntu-latest
