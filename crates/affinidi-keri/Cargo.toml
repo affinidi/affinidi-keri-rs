@@ -21,7 +21,6 @@ affinidi-keri-db = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 
 [features]
 # The LMDB-backed store (`affinidi-keri-db`, which builds LMDB through `heed`):
