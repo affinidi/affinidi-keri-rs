@@ -14,12 +14,8 @@ publish.workspace = true
 readme = "README.md"
 
 [dependencies]
-affinidi-keri-core = { workspace = true }
-affinidi-keri-crypto = { workspace = true }
-affinidi-cesr = { workspace = true }
 heed = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 hex = { workspace = true }
