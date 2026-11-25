@@ -93,18 +93,23 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      # Cargo.lock is not committed, and `audit-check` reads `./Cargo.lock`
+      # Cargo.lock is not committed, and `cargo audit` reads `./Cargo.lock`
       # rather than resolving for itself. Generating it here also means the
       # audit runs against a fresh resolution, so an advisory that upstream has
       # already patched clears on its own.
       - run: cargo generate-lockfile
-      - uses: rustsec/audit-check@v2
+      # `cargo audit` directly rather than `rustsec/audit-check`, whose latest
+      # release (v2.0.0) still targets the deprecated Node.js 20 runtime.
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          # Kept in step with deny.toml's [advisories] ignore list: chrono
-          # "unmaintained", accepted 2026-11-17 (no vulnerability, no fixed
-          # release). Without this, audit-check files an issue for it.
-          ignore: RUSTSEC-2026-0543
+          tool: cargo-audit
+      # Fails on vulnerabilities; unmaintained/unsound/notice advisories are
+      # reported as warnings without failing, as audit-check did.
+      #
+      # The ignore list is kept in step with deny.toml's [advisories] ignore
+      # list: chrono "unmaintained", accepted 2026-11-17 (no vulnerability, no
+      # fixed release).
+      - run: cargo audit --ignore RUSTSEC-2026-0543
 
   deny:
     runs-on: ubuntu-latest
